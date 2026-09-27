@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -28,9 +29,16 @@ type WriteResponse struct {
 }
 
 // chatModel is one provider's plain chat call: system + user message in,
-// text out. Everything else (writing, deciding) is built on it.
+// text out. Everything else (writing, deciding) is built on it. A provider
+// that can enforce a JSON schema on the reply uses schema when given.
 type chatModel interface {
-	chat(ctx context.Context, system, user string, maxTokens int) (text string, cost float64, err error)
+	chat(ctx context.Context, req chatRequest) (text string, cost float64, err error)
+}
+
+type chatRequest struct {
+	System, User string
+	MaxTokens    int
+	Schema       map[string]any // optional: the reply must match this JSON schema
 }
 
 // chatBackend makes any chat model both a Writer and a decision Backend.
@@ -55,7 +63,7 @@ func (c *chatBackend) Write(ctx context.Context, req WriteRequest) (WriteRespons
 	if max == 0 {
 		max = c.maxTokens
 	}
-	text, cost, err := c.model.chat(ctx, req.System, req.Prompt, max)
+	text, cost, err := c.model.chat(ctx, chatRequest{System: req.System, User: req.Prompt, MaxTokens: max})
 	if err != nil {
 		return WriteResponse{}, fmt.Errorf("backend %s: %w", c.name, err)
 	}
@@ -73,15 +81,25 @@ func (c *chatBackend) Decide(ctx context.Context, state map[string]any, qs []flo
 	if err != nil {
 		return Response{}, err
 	}
-	text, cost, err := c.model.chat(ctx, decideSystem, prompt, 1024)
-	if err != nil {
-		return Response{}, fmt.Errorf("backend %s: %w", c.name, err)
+	req := chatRequest{System: decideSystem, User: prompt, MaxTokens: 1024, Schema: decideSchema(qs)}
+	var total float64
+	// Small models sometimes wander off the format; one more try usually
+	// lands it.
+	for attempt := 1; ; attempt++ {
+		text, cost, err := c.model.chat(ctx, req)
+		total += cost
+		if err != nil {
+			return Response{}, fmt.Errorf("backend %s: %w", c.name, err)
+		}
+		decs, perr := parseDecisions(text, qs)
+		if perr == nil {
+			return Response{Decisions: decs, CostUSD: total}, nil
+		}
+		if attempt == 2 {
+			return Response{}, fmt.Errorf("backend %s: %w", c.name, perr)
+		}
+		ReportStatus(ctx, "%s: reply didn't fit the format (%v), asking again", c.name, perr)
 	}
-	decs, err := parseDecisions(text, qs)
-	if err != nil {
-		return Response{}, fmt.Errorf("backend %s: %w", c.name, err)
-	}
-	return Response{Decisions: decs, CostUSD: cost}, nil
 }
 
 // decidePrompt lays out the state and each question with its allowed answers
@@ -131,17 +149,44 @@ func allowedAnswers(q flow.Question) []answerKey {
 	return out
 }
 
+// decideSchema is the exact reply shape, for providers that enforce it:
+// one probability per allowed answer of every question.
+func decideSchema(qs []flow.Question) map[string]any {
+	obj := func(props map[string]any) map[string]any {
+		req := make([]string, 0, len(props))
+		for k := range props {
+			req = append(req, k)
+		}
+		slices.Sort(req)
+		return map[string]any{"type": "object", "properties": props, "required": req, "additionalProperties": false}
+	}
+	answers := map[string]any{}
+	for _, q := range qs {
+		probs := map[string]any{}
+		for _, a := range allowedAnswers(q) {
+			probs[a.key] = map[string]any{"type": "number"}
+		}
+		answers[q.Name] = obj(map[string]any{"probs": obj(probs)})
+	}
+	return obj(map[string]any{"answers": obj(answers)})
+}
+
+// parseDecisions reads the first JSON object in a reply. It is lenient
+// about what small models do: numbers written as strings, text around the
+// JSON, and a single {"answer", "confidence"} instead of probabilities.
 func parseDecisions(text string, qs []flow.Question) ([]Decision, error) {
-	start, end := strings.Index(text, "{"), strings.LastIndex(text, "}")
-	if start < 0 || end < start {
+	start := strings.Index(text, "{")
+	if start < 0 {
 		return nil, fmt.Errorf("model did not reply with JSON: %.120q", text)
 	}
 	var reply struct {
 		Answers map[string]struct {
-			Probs map[string]float64 `json:"probs"`
+			Probs      map[string]any `json:"probs"`
+			Answer     any            `json:"answer"`
+			Confidence any            `json:"confidence"`
 		} `json:"answers"`
 	}
-	if err := json.Unmarshal([]byte(text[start:end+1]), &reply); err != nil {
+	if err := json.NewDecoder(strings.NewReader(text[start:])).Decode(&reply); err != nil {
 		return nil, fmt.Errorf("model reply is not valid JSON: %v", err)
 	}
 
@@ -151,10 +196,32 @@ func parseDecisions(text string, qs []flow.Question) ([]Decision, error) {
 		if !ok {
 			return nil, fmt.Errorf("model gave no answer for %q", q.Name)
 		}
+		raw := map[string]float64{}
+		for k, v := range a.Probs {
+			if p, ok := number(v); ok {
+				raw[k] = p
+			}
+		}
+		// {"answer": "yes", "confidence": 0.8}: the rest shares what's left.
+		if len(raw) == 0 && a.Answer != nil {
+			keys := allowedAnswers(q)
+			chosen := strings.ToLower(fmt.Sprint(a.Answer))
+			conf, ok := number(a.Confidence)
+			if !ok {
+				conf = 1
+			}
+			for _, k := range keys {
+				if k.key == chosen {
+					raw[k.key] = conf
+				} else if len(keys) > 1 {
+					raw[k.key] = (1 - conf) / float64(len(keys)-1)
+				}
+			}
+		}
 		probs := map[string]float64{}
 		var sum float64
 		for _, k := range allowedAnswers(q) {
-			p := math.Max(a.Probs[k.key], 0)
+			p := math.Max(raw[k.key], 0)
 			probs[k.key] = p
 			sum += p
 		}
@@ -167,6 +234,17 @@ func parseDecisions(text string, qs []flow.Question) ([]Decision, error) {
 		out[i] = decisionFromProbs(q, probs)
 	}
 	return out, nil
+}
+
+func number(v any) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(x), 64)
+		return f, err == nil
+	}
+	return 0, false
 }
 
 // decisionFromProbs turns a normalised distribution into a typed decision.

@@ -20,8 +20,11 @@ import (
 //	model:       required
 //	base_url:    default https://api.openai.com/v1 (Ollama: http://localhost:11434/v1)
 //	api_key_env: default OPENAI_API_KEY; may be unset for local servers
+//	structured:  default true; decisions send a JSON schema the server must
+//	             follow (response_format). Set false if a server rejects it.
 type openAIChat struct {
 	url, model, keyEnv string
+	structured         bool
 	opts               map[string]any
 	client             *http.Client
 }
@@ -33,24 +36,31 @@ func newOpenAI(cfg flow.BackendConfig) (*chatBackend, error) {
 		return nil, fmt.Errorf("backend %q: model is required", cfg.Name)
 	}
 	m := &openAIChat{
-		url:    strings.TrimSuffix(optString(o, "base_url", "https://api.openai.com/v1"), "/") + "/chat/completions",
-		model:  model,
-		keyEnv: optString(o, "api_key_env", "OPENAI_API_KEY"),
-		opts:   o,
-		client: &http.Client{Timeout: time.Duration(optFloat(o, "timeout", 120) * float64(time.Second))},
+		url:        strings.TrimSuffix(optString(o, "base_url", "https://api.openai.com/v1"), "/") + "/chat/completions",
+		model:      model,
+		keyEnv:     optString(o, "api_key_env", "OPENAI_API_KEY"),
+		structured: o["structured"] != false,
+		opts:       o,
+		client:     &http.Client{Timeout: time.Duration(optFloat(o, "timeout", 120) * float64(time.Second))},
 	}
 	return newChatBackend(cfg, m), nil
 }
 
-func (m *openAIChat) chat(ctx context.Context, system, user string, maxTokens int) (string, float64, error) {
+func (m *openAIChat) chat(ctx context.Context, r chatRequest) (string, float64, error) {
 	type msg struct {
 		Role    string `json:"role"`
 		Content string `json:"content"`
 	}
 	body := map[string]any{
 		"model":      m.model,
-		"max_tokens": maxTokens,
-		"messages":   []msg{{"system", system}, {"user", user}},
+		"max_tokens": r.MaxTokens,
+		"messages":   []msg{{"system", r.System}, {"user", r.User}},
+	}
+	if r.Schema != nil && m.structured {
+		body["response_format"] = map[string]any{
+			"type":        "json_schema",
+			"json_schema": map[string]any{"name": "decision", "strict": true, "schema": r.Schema},
+		}
 	}
 	data, err := json.Marshal(body)
 	if err != nil {

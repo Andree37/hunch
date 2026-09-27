@@ -47,7 +47,8 @@ func newBedrock(cfg flow.BackendConfig) (*chatBackend, error) {
 	return newChatBackend(cfg, m), nil
 }
 
-func (m *bedrockChat) chat(ctx context.Context, system, user string, maxTokens int) (string, float64, error) {
+func (m *bedrockChat) chat(ctx context.Context, r chatRequest) (string, float64, error) {
+	system, user, maxTokens := r.System, r.User, r.MaxTokens
 	in := &bedrockruntime.ConverseInput{
 		ModelId: aws.String(m.model),
 		Messages: []types.Message{{

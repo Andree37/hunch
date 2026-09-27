@@ -323,6 +323,19 @@ The validator warns when a chat model's self-reported confidence drives a
 route, and the TUI marks those numbers `self-reported`; check such
 thresholds against your test cases.
 
+Swap models per run without editing the flow: `--backend` picks who decides
+and `--writer` who writes, on `run`, `test`, `tune`, `serve` and `tui`.
+
+```sh
+hunch test examples/respond.yaml --backend jev                    # 3/3
+hunch test examples/respond.yaml --backend ollama --writer ollama # a 0.5B local model: 1/3
+```
+
+For decisions, `openai` backends send a JSON schema the server must follow
+(structured outputs), which small local models need to answer in the right
+shape; set `structured: false` for a server that rejects it. Replies are
+parsed leniently and a reply that still doesn't fit is asked for once more.
+
 Chat backends also take `max_tokens`, `timeout`, and `price_in_per_mtok` / `price_out_per_mtok` to report cost.
 
 ## Test cases

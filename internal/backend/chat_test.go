@@ -182,3 +182,67 @@ func TestMockWrites(t *testing.T) {
 		t.Errorf("mock write = %q / %q", a.Text, b.Text)
 	}
 }
+
+func TestChatDecideSendsSchema(t *testing.T) {
+	var got []map[string]any
+	srv := fakeOpenAI(t, `{"answers": {"bug": {"probs": {"yes": 1, "no": 0}}}}`, &got)
+	defer srv.Close()
+	b, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "m", "base_url": srv.URL + "/v1"}})
+	if _, err := b.Decide(context.Background(), nil, chatQuestions[:1]); err != nil {
+		t.Fatal(err)
+	}
+	rf, ok := got[0]["response_format"].(map[string]any)
+	if !ok || rf["type"] != "json_schema" {
+		t.Fatalf("response_format = %v", got[0]["response_format"])
+	}
+	schema, _ := json.Marshal(rf["json_schema"])
+	if !strings.Contains(string(schema), `"required":["no","yes"]`) || !strings.Contains(string(schema), `"strict":true`) {
+		t.Errorf("schema = %s", schema)
+	}
+
+	// Writing never sends a schema, and structured: false turns it off.
+	b.(Writer).Write(context.Background(), WriteRequest{Prompt: "hi"})
+	if _, ok := got[1]["response_format"]; ok {
+		t.Error("writes must not send a schema")
+	}
+	off, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "m", "base_url": srv.URL + "/v1", "structured": false}})
+	off.Decide(context.Background(), nil, chatQuestions[:1])
+	if _, ok := got[2]["response_format"]; ok {
+		t.Error("structured: false should not send a schema")
+	}
+}
+
+func TestParseDecisionsIsLenient(t *testing.T) {
+	cases := map[string]string{
+		"strings for numbers":  `{"answers": {"bug": {"probs": {"yes": "0.9", "no": "0.1"}}}}`,
+		"answer + confidence":  `{"answers": {"bug": {"answer": "yes", "confidence": 0.9}}}`,
+		"text around the JSON": "Here you go:\n{\"answers\": {\"bug\": {\"probs\": {\"yes\": 0.9, \"no\": 0.1}}}} Hope that helps!",
+		"a second object":      `{"answers": {"bug": {"probs": {"yes": 0.9, "no": 0.1}}}}, {"extra": true}`,
+	}
+	for name, reply := range cases {
+		decs, err := parseDecisions(reply, chatQuestions[:1])
+		if err != nil || decs[0].Answer != true || decs[0].Probs["yes"] < 0.89 {
+			t.Errorf("%s: %+v, %v", name, decs, err)
+		}
+	}
+}
+
+func TestChatDecideRetriesOnce(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		reply := `not json`
+		if calls == 2 {
+			reply = `{"answers": {"bug": {"probs": {"yes": 1, "no": 0}}}}`
+		}
+		out, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": reply}}}})
+		w.Write(out)
+	}))
+	defer srv.Close()
+	b, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "m", "base_url": srv.URL + "/v1"}})
+	var notes []string
+	ctx := WithStatus(context.Background(), func(s string) { notes = append(notes, s) })
+	if _, err := b.Decide(ctx, nil, chatQuestions[:1]); err != nil || calls != 2 || len(notes) != 1 {
+		t.Errorf("err=%v calls=%d notes=%q", err, calls, notes)
+	}
+}

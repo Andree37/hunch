@@ -40,14 +40,14 @@ func newAnthropic(cfg flow.BackendConfig) (*chatBackend, error) {
 	return newChatBackend(cfg, m), nil
 }
 
-func (m *anthropicChat) chat(ctx context.Context, system, user string, maxTokens int) (string, float64, error) {
+func (m *anthropicChat) chat(ctx context.Context, r chatRequest) (string, float64, error) {
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(m.model),
-		MaxTokens: int64(maxTokens),
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(user))},
+		MaxTokens: int64(r.MaxTokens),
+		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(r.User))},
 	}
-	if system != "" {
-		params.System = []anthropic.TextBlockParam{{Text: system}}
+	if r.System != "" {
+		params.System = []anthropic.TextBlockParam{{Text: r.System}}
 	}
 	resp, err := m.client.Messages.New(ctx, params)
 	if err != nil {
