@@ -100,7 +100,7 @@ func cmdRun(ctx context.Context, args []string) error {
 	var sets multiFlag
 	fs.Var(&sets, "set", "set a state field, key=value (repeatable; values parse as JSON when they can)")
 	stateFile := fs.String("state", "", "JSON file with initial state")
-	traceFile := fs.String("trace", "", "append run events to this JSONL file")
+	traceFile := fs.String("trace", "", "record the run: a .jsonl file, a directory or s3://bucket/prefix")
 	asJSON := fs.Bool("json", false, "print final state as JSON on stdout; progress goes to stderr")
 	maxVisits := fs.Int("max-visits", 5, "max times a single node may run")
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
@@ -153,12 +153,13 @@ func cmdRun(ctx context.Context, args []string) error {
 
 	var rec *trace.Writer
 	if *traceFile != "" {
-		tf, err := os.OpenFile(*traceFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		w, closer, err := trace.Open(ctx, *traceFile, 100<<20)
 		if err != nil {
 			return err
 		}
-		defer tf.Close()
-		rec = trace.NewWriter(tf)
+		defer closer.Close()
+		w.OnError = func(err error) { fmt.Fprintln(os.Stderr, "hunch:", err) }
+		rec = w
 	}
 	runID := trace.NewID()
 	rec.Start(runID, path, f.DefaultBackend, inputsOnly(f, state))
@@ -200,7 +201,7 @@ func cmdTUI(args []string) error {
 	stateFile := fs.String("state", "", "JSON file with initial state")
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
 	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
-	runsFile := fs.String("runs", "", "recorded runs to list and replay (from run/serve --trace)")
+	runsFile := fs.String("runs", "", "recorded runs to list and replay: a .jsonl file, a directory or s3://bucket/prefix")
 	path, err := parseArgs(fs, args)
 	if err != nil {
 		return err

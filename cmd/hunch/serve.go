@@ -33,13 +33,13 @@ func cmdServe(ctx context.Context, args []string) error {
 	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
 	dryRun := fs.Bool("dry-run", false, "don't send http requests that write; record them instead")
 	tokenEnv := fs.String("token-env", "", "require `Authorization: Bearer <token>` with the token read from this env var")
-	traceFile := fs.String("trace", "", "append every run's events to this JSONL file")
+	traceFile := fs.String("trace", "", "record every run: a .jsonl file, a directory or s3://bucket/prefix")
 	timeout := fs.Duration("timeout", 5*time.Minute, "longest a single run may take")
 	dedupeKey := fs.String("dedupe-key", "", "template naming a run from its input, e.g. '{{record.id}}'; repeats of a finished run get its reply without running again")
 	dedupeTTL := fs.Duration("dedupe-ttl", 24*time.Hour, "how long a finished run's reply is remembered for duplicates")
 	maxConcurrent := fs.Int("max-concurrent", 4, "runs at once; more wait up to 30s, then get 503")
 	dedupeFile := fs.String("dedupe-file", "", "keep finished runs' replies in this file so duplicates are still caught after a restart")
-	traceMaxMB := fs.Int("trace-max-mb", 100, "roll the trace file over at this size, keeping 3 old ones (0 = never)")
+	traceMaxMB := fs.Int("trace-max-mb", 100, "roll a .jsonl trace file over at this size, keeping 3 old ones (0 = never)")
 	path, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -73,12 +73,13 @@ func cmdServe(ctx context.Context, args []string) error {
 	}
 	var rec *trace.Writer
 	if *traceFile != "" {
-		tf, err := trace.OpenRotating(*traceFile, int64(*traceMaxMB)<<20, 3)
+		w, closer, err := trace.Open(ctx, *traceFile, int64(*traceMaxMB)<<20)
 		if err != nil {
 			return err
 		}
-		defer tf.Close()
-		rec = trace.NewWriter(tf)
+		defer closer.Close()
+		w.OnError = func(err error) { log.Print(err) }
+		rec = w
 	}
 
 	h.token, h.trace = token, rec

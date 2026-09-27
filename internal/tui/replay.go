@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -8,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Andree37/hunch/internal/runner"
 	"github.com/Andree37/hunch/internal/tmpl"
@@ -29,30 +32,66 @@ func (m *Model) SetRuns(path string) error {
 }
 
 func (m *Model) loadRuns() error {
-	st, err := os.Stat(m.runsPath)
+	runs, err := trace.ReadAll(context.Background(), m.runsPath)
 	if err != nil {
 		return err
 	}
-	runs, err := trace.ReadFiles(m.runsPath)
-	if err != nil {
-		return err
-	}
-	slices.Reverse(runs) // newest first
-	m.runs, m.runsMod = runs, st.ModTime()
-	m.runCursor = max(min(m.runCursor, len(runs)-1), 0)
+	m.setRuns(runs)
+	m.runsMod = m.runsStamp()
 	return nil
 }
 
-// refreshRuns rereads the runs file if it grew, e.g. while serve records.
-func (m *Model) refreshRuns() {
-	if m.runsPath == "" {
-		return
+func (m *Model) setRuns(runs []*trace.Run) {
+	slices.Reverse(runs) // newest first
+	prev := len(m.runs)
+	m.runs = runs
+	m.runCursor = max(min(m.runCursor, len(runs)-1), 0)
+	if prev > 0 && len(runs) > prev {
+		m.flash = fmt.Sprintf("%d new run(s) recorded", len(runs)-prev)
 	}
-	if st, err := os.Stat(m.runsPath); err == nil && !st.ModTime().Equal(m.runsMod) {
-		prev := len(m.runs)
-		if m.loadRuns() == nil && len(m.runs) > prev {
-			m.flash = fmt.Sprintf("%d new run(s) recorded", len(m.runs)-prev)
+}
+
+// runsFile reports whether the runs come from a single .jsonl file (cheap
+// to check every tick) rather than a directory or S3.
+func (m *Model) runsFile() bool {
+	st, err := os.Stat(m.runsPath)
+	return err == nil && !st.IsDir()
+}
+
+func (m *Model) runsStamp() time.Time {
+	if m.runsFile() {
+		if st, err := os.Stat(m.runsPath); err == nil {
+			return st.ModTime()
 		}
+	}
+	return time.Now() // for directories and S3: when they were last listed
+}
+
+type runsLoadedMsg struct {
+	runs []*trace.Run
+	err  error
+}
+
+// refreshRuns picks up newly recorded runs: a file when it changes, a
+// directory or S3 every 10s, listed in the background so the UI never waits.
+func (m *Model) refreshRuns() tea.Cmd {
+	if m.runsPath == "" || m.runsLoading {
+		return nil
+	}
+	if m.runsFile() {
+		if !m.runsStamp().Equal(m.runsMod) {
+			m.loadRuns()
+		}
+		return nil
+	}
+	if time.Since(m.runsMod) < 10*time.Second {
+		return nil
+	}
+	m.runsLoading = true
+	path := m.runsPath
+	return func() tea.Msg {
+		runs, err := trace.ReadAll(context.Background(), path)
+		return runsLoadedMsg{runs, err}
 	}
 }
 

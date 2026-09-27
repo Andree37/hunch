@@ -110,14 +110,15 @@ type Model struct {
 
 	flowView flowView
 
-	runsPath  string // recorded runs file, if any
-	runsMod   time.Time
-	runs      []*trace.Run // newest first
-	runCursor int
-	showRuns  bool       // pane 2 lists runs instead of test cases
-	replay    *trace.Run // recorded run shown in the views
-	replayK   int        // how many of its steps are shown
-	live      bool       // http nodes really send; off by default
+	runsPath    string // recorded runs: a file, a directory or s3://bucket/prefix
+	runsMod     time.Time
+	runsLoading bool
+	runs        []*trace.Run // newest first
+	runCursor   int
+	showRuns    bool       // pane 2 lists runs instead of test cases
+	replay      *trace.Run // recorded run shown in the views
+	replayK     int        // how many of its steps are shown
+	live        bool       // http nodes really send; off by default
 
 	flash         string
 	width, height int
@@ -248,13 +249,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.flash = "reloaded " + filepath.Base(m.path)
 			}
 		}
-		m.refreshRuns()
+		refresh := m.refreshRuns()
 		if casesStamp(m.path) != m.casesStamp {
 			if err := m.loadCases(); err != nil {
 				m.flash = "tests: " + err.Error()
 			}
 		}
-		return m, tick()
+		return m, tea.Batch(tick(), refresh)
+
+	case runsLoadedMsg:
+		m.runsLoading, m.runsMod = false, time.Now()
+		if msg.err != nil {
+			m.flash = "runs: " + msg.err.Error()
+		} else {
+			m.setRuns(msg.runs)
+		}
+		return m, nil
 
 	case pausedMsg:
 		if msg.id != m.runID {

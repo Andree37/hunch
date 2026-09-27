@@ -31,7 +31,7 @@ type sample struct {
 // (right answer known). No threshold needs a model call of its own.
 func cmdTune(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("tune", flag.ExitOnError)
-	runsFile := fs.String("runs", "", "recorded runs to learn from (from run/serve --trace)")
+	runsFile := fs.String("runs", "", "recorded runs to learn from: a .jsonl file, a directory or s3://bucket/prefix")
 	backendName := fs.String("backend", "", "backend for running the test cases")
 	writerName := fs.String("writer", "", "backend for llm nodes when running the test cases")
 	noTests := fs.Bool("no-tests", false, "don't run the test cases; use recorded runs only")
@@ -51,7 +51,7 @@ func cmdTune(ctx context.Context, args []string) error {
 	samples := map[string][]sample{}
 	var sources []string
 	if *runsFile != "" {
-		runs, err := trace.ReadFiles(*runsFile)
+		runs, err := trace.ReadAll(ctx, *runsFile)
 		if err != nil {
 			return err
 		}

@@ -585,3 +585,48 @@ func TestRunsIncludeRolledOverFiles(t *testing.T) {
 		t.Errorf("runs = %d, first=%v", len(m.runs), m.runs[0].Input)
 	}
 }
+
+func TestRunsFromADirectory(t *testing.T) {
+	dir := t.TempDir()
+	f, _ := flow.Load("testdata/inbox.yaml")
+	b, _ := backend.New(f.Backends["mock"])
+	w, _, err := trace.Open(context.Background(), dir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := func(sender string) {
+		id := trace.NewID()
+		in := map[string]any{"sender": sender, "message": "hi"}
+		w.Start(id, "inbox", "mock", in)
+		res, err := runner.Run(context.Background(), f, in, runner.Options{
+			Backends: map[string]backend.Backend{"mock": b},
+			OnEvent:  func(ev runner.Event) { w.Step(id, ev) },
+		})
+		w.End(id, res, err)
+	}
+	record("ann")
+
+	m, _ := New("testdata/inbox.yaml", nil, "mock", false)
+	if err := m.SetRuns(dir); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.runs) != 1 {
+		t.Fatalf("runs = %d", len(m.runs))
+	}
+
+	// A run recorded later shows up on the next background listing.
+	time.Sleep(5 * time.Millisecond) // a later start time sorts after
+	record("bob")
+	m.runsMod = time.Now().Add(-11 * time.Second)
+	cmd := m.refreshRuns()
+	if cmd == nil {
+		t.Fatal("a directory should be re-listed in the background")
+	}
+	m.Update(cmd())
+	if len(m.runs) != 2 || m.runs[0].Input["sender"] != "bob" || !strings.Contains(m.flash, "1 new run") {
+		t.Errorf("runs=%d first=%v flash=%q", len(m.runs), m.runs[0].Input, m.flash)
+	}
+	if m.refreshRuns() != nil {
+		t.Error("should not re-list again within 10s")
+	}
+}

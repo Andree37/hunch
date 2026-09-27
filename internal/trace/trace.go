@@ -7,16 +7,20 @@ package trace
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Andree37/hunch/internal/runner"
+	"github.com/Andree37/hunch/internal/store"
 )
 
 type start struct {
@@ -43,29 +47,71 @@ type end struct {
 	Error   string         `json:"error,omitempty"`
 }
 
-// Writer appends runs to w; safe for concurrent runs.
+// Writer records runs; safe for concurrent runs. It either streams lines
+// to one file, or (on a store) keeps each run's lines until it ends and
+// writes them as one object, since S3 objects can't be appended to.
 type Writer struct {
-	mu sync.Mutex
-	w  io.Writer
+	mu      sync.Mutex
+	w       io.Writer
+	st      store.Store
+	pending map[string]*runBuf
+	OnError func(error) // store writes that fail; default logs nothing
+}
+
+type runBuf struct {
+	started time.Time
+	buf     bytes.Buffer
 }
 
 func NewWriter(w io.Writer) *Writer { return &Writer{w: w} }
 
-func (t *Writer) write(v any) {
+// NewStoreWriter writes one object per run into st, keyed by start time.
+func NewStoreWriter(st store.Store) *Writer {
+	return &Writer{st: st, pending: map[string]*runBuf{}}
+}
+
+// Open records to loc: a path ending in .jsonl is one file, appended to and
+// rolled over at maxBytes (keeping 3); a directory or s3://bucket/prefix
+// gets one object per run.
+func Open(ctx context.Context, loc string, maxBytes int64) (*Writer, io.Closer, error) {
+	if strings.HasSuffix(loc, ".jsonl") && !store.IsRemote(loc) {
+		f, err := OpenRotating(loc, maxBytes, 3)
+		if err != nil {
+			return nil, nil, err
+		}
+		return NewWriter(f), f, nil
+	}
+	st, err := store.Open(ctx, loc)
+	if err != nil {
+		return nil, nil, err
+	}
+	return NewStoreWriter(st), io.NopCloser(nil), nil
+}
+
+func (t *Writer) write(id string, v any) {
 	if t == nil {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	json.NewEncoder(t.w).Encode(v)
+	if t.st == nil {
+		json.NewEncoder(t.w).Encode(v)
+		return
+	}
+	rb, ok := t.pending[id]
+	if !ok {
+		rb = &runBuf{started: time.Now().UTC()}
+		t.pending[id] = rb
+	}
+	json.NewEncoder(&rb.buf).Encode(v)
 }
 
 func (t *Writer) Start(id, flow, backend string, input map[string]any) {
-	t.write(start{Type: "start", Run: id, Time: time.Now().UTC(), Flow: flow, Backend: backend, Input: input})
+	t.write(id, start{Type: "start", Run: id, Time: time.Now().UTC(), Flow: flow, Backend: backend, Input: input})
 }
 
 func (t *Writer) Step(id string, ev runner.Event) {
-	t.write(step{Type: "step", Run: id, Event: ev})
+	t.write(id, step{Type: "step", Run: id, Event: ev})
 }
 
 func (t *Writer) End(id string, res *runner.Result, err error) {
@@ -76,7 +122,22 @@ func (t *Writer) End(id string, res *runner.Result, err error) {
 	if err != nil {
 		e.Error = err.Error()
 	}
-	t.write(e)
+	t.write(id, e)
+	if t == nil || t.st == nil {
+		return
+	}
+	t.mu.Lock()
+	rb := t.pending[id]
+	delete(t.pending, id)
+	t.mu.Unlock()
+	if rb == nil {
+		return
+	}
+	// Keys sort by start time: 2026-09-27/18-17-19.123-<id>.jsonl
+	key := rb.started.Format("2006-01-02/15-04-05.000") + "-" + id + ".jsonl"
+	if err := t.st.Put(context.Background(), key, rb.buf.Bytes()); err != nil && t.OnError != nil {
+		t.OnError(fmt.Errorf("recording run %s to %s: %w", id, t.st, err))
+	}
 }
 
 // NewID returns a short random run id.
@@ -217,6 +278,37 @@ func (r *RotatingFile) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.f.Close()
+}
+
+// ReadAll reads recorded runs from loc, oldest first: a .jsonl file (with
+// its rolled-over files), a directory or s3://bucket/prefix of per-run
+// objects.
+func ReadAll(ctx context.Context, loc string) ([]*Run, error) {
+	if !store.IsRemote(loc) {
+		if st, err := os.Stat(loc); err == nil && !st.IsDir() {
+			return ReadFiles(loc)
+		}
+	}
+	st, err := store.Open(ctx, loc)
+	if err != nil {
+		return nil, err
+	}
+	keys, err := st.List(ctx, "")
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", st, err)
+	}
+	var all []byte
+	for _, k := range keys {
+		if !strings.HasSuffix(k, ".jsonl") {
+			continue
+		}
+		data, err := st.Get(ctx, k)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", k, err)
+		}
+		all = append(all, data...)
+	}
+	return Read(bytes.NewReader(all))
 }
 
 // ReadFiles reads a trace file together with the older files it rolled over

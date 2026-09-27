@@ -2,6 +2,7 @@ package trace
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/Andree37/hunch/internal/backend"
 	"github.com/Andree37/hunch/internal/flow"
 	"github.com/Andree37/hunch/internal/runner"
+	"github.com/Andree37/hunch/internal/store"
 )
 
 func TestWriteAndReadInterleavedRuns(t *testing.T) {
@@ -93,5 +95,47 @@ func TestRotatingFile(t *testing.T) {
 	// 7 lines of 40 bytes, 2 per file: current 40, .1 80, .2 80, .3 dropped.
 	if size(path) != 40 || size(path+".1") != 80 || size(path+".2") != 80 || size(path+".3") != -1 {
 		t.Errorf("sizes: %d %d %d %d", size(path), size(path+".1"), size(path+".2"), size(path+".3"))
+	}
+}
+
+func TestStoreWriterOneObjectPerRun(t *testing.T) {
+	dir := t.TempDir()
+	w, closer, err := Open(context.Background(), dir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closer.Close()
+	w.Start("a", "f.yaml", "m", map[string]any{"who": "ann"})
+	w.Start("b", "f.yaml", "m", map[string]any{"who": "bob"})
+	w.Step("a", runner.Event{Step: 1, Node: "gate"})
+	w.Step("b", runner.Event{Step: 1, Node: "gate"})
+	w.End("b", &runner.Result{Path: []string{"gate"}}, nil)
+	w.End("a", &runner.Result{Path: []string{"gate"}}, errors.New("boom"))
+
+	keys, _ := store.Dir(dir).List(context.Background(), "")
+	if len(keys) != 2 || !strings.HasSuffix(keys[0], "-a.jsonl") || !strings.Contains(keys[0], "/") {
+		t.Fatalf("keys = %v (want one per run, ordered by start)", keys)
+	}
+	runs, err := ReadAll(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 || runs[0].ID != "a" || runs[0].Error != "boom" || runs[1].Input["who"] != "bob" || !runs[1].Done {
+		t.Errorf("runs = %+v, %+v", runs[0], runs[1])
+	}
+}
+
+func TestOpenPicksFileForJSONL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	w, closer, err := Open(context.Background(), path, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Start("r", "f", "", nil)
+	w.End("r", &runner.Result{}, nil)
+	closer.Close()
+	runs, err := ReadAll(context.Background(), path)
+	if err != nil || len(runs) != 1 || !runs[0].Done {
+		t.Errorf("runs = %v, %v", runs, err)
 	}
 }
