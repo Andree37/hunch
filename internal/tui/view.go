@@ -62,7 +62,7 @@ func (m *Model) View() string {
 
 	listLen := len(m.cases)
 	if m.showRuns {
-		listLen = len(m.runs)
+		listLen = len(m.runs) + 1 + 2*len(m.otherRuns)
 	}
 	testsH := max(min(listLen+3, bodyH/3), 4)
 	flowH := bodyH - testsH
@@ -108,7 +108,7 @@ func (m *Model) flowLines(w, h int) []string {
 	if m.flow == nil {
 		return []string{sRed.Render(fmt.Sprint(m.loadErr))}
 	}
-	warn := m.otherFlowLines()
+	warn := m.oldVersionLines()
 	if m.flowView == viewPath && m.run != nil && len(m.run.path) > 0 {
 		lines, rowLine := m.pathLines()
 		lines = append(warn, lines...)
@@ -599,7 +599,7 @@ func (m *Model) modeLabel() string {
 func (m *Model) pane2Title() string {
 	switch {
 	case m.showRuns:
-		return fmt.Sprintf("[2] Runs · %d recorded  (t tests)", len(m.runs))
+		return fmt.Sprintf("[2] Runs · %d of this flow  (t tests)", len(m.runs))
 	case m.runsPath != "":
 		return "[2] Tests  (t runs)"
 	}

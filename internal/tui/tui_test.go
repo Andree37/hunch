@@ -429,7 +429,12 @@ func TestSwitchNode(t *testing.T) {
 // recordRuns runs the test flow for each input and records it like serve does.
 func recordRuns(t *testing.T, inputs ...map[string]any) string {
 	t.Helper()
-	f, err := flow.Load("testdata/inbox.yaml")
+	return recordRunsFor(t, "testdata/inbox.yaml", inputs...)
+}
+
+func recordRunsFor(t *testing.T, flowPath string, inputs ...map[string]any) string {
+	t.Helper()
+	f, err := flow.Load(flowPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +445,7 @@ func recordRuns(t *testing.T, inputs ...map[string]any) string {
 	rec := trace.NewWriter(file)
 	for _, in := range inputs {
 		id := trace.NewID()
-		rec.Start(id, "testdata/inbox.yaml", "mock", in)
+		rec.Start(id, flowPath, "mock", in)
 		res, err := runner.Run(context.Background(), f, in, runner.Options{
 			Backends: map[string]backend.Backend{"mock": b},
 			OnEvent:  func(ev runner.Event) { rec.Step(id, ev) },
@@ -464,7 +469,7 @@ func TestReplayRecordedRuns(t *testing.T) {
 	}
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 44})
 	screen := ansi.Strip(m.View())
-	if !strings.Contains(screen, "[2] Runs · 2 recorded") || !strings.Contains(screen, "message=urgent sender=boss") {
+	if !strings.Contains(screen, "[2] Runs · 2 of this flow") || !strings.Contains(screen, "message=urgent sender=boss") {
 		t.Fatalf("want runs listed, newest first:\n%s", screen)
 	}
 
@@ -534,7 +539,7 @@ func TestSaveReplayedRunAsTest(t *testing.T) {
 	flowPath := filepath.Join(dir, "inbox.yaml")
 	src, _ := os.ReadFile("testdata/inbox.yaml")
 	os.WriteFile(flowPath, src, 0o644)
-	runs := recordRuns(t, map[string]any{"sender": "carol", "message": "hi"})
+	runs := recordRunsFor(t, flowPath, map[string]any{"sender": "carol", "message": "hi"})
 
 	m, err := New(flowPath, nil, "mock", false)
 	if err != nil {
@@ -597,7 +602,7 @@ func TestRunsFromADirectory(t *testing.T) {
 	record := func(sender string) {
 		id := trace.NewID()
 		in := map[string]any{"sender": sender, "message": "hi"}
-		w.Start(id, "inbox", "mock", in)
+		w.Start(id, "testdata/inbox.yaml", "mock", in)
 		res, err := runner.Run(context.Background(), f, in, runner.Options{
 			Backends: map[string]backend.Backend{"mock": b},
 			OnEvent:  func(ev runner.Event) { w.Step(id, ev) },
@@ -667,7 +672,7 @@ func TestReplayedActionsShowTheirResults(t *testing.T) {
 	}
 }
 
-func TestRunFromAnotherFlowIsFlagged(t *testing.T) {
+func TestRunsOfOtherFlowsAreHidden(t *testing.T) {
 	runs := recordRuns(t, map[string]any{"sender": "carol", "message": "hi"}) // recorded with testdata/inbox.yaml
 	other := filepath.Join(t.TempDir(), "other.yaml")
 	os.WriteFile(other, []byte(`nodes: {fetch: {action: log, message: hi}}`), 0o644)
@@ -676,23 +681,39 @@ func TestRunFromAnotherFlowIsFlagged(t *testing.T) {
 	m.SetRuns(runs)
 	m.Update(tea.WindowSizeMsg{Width: 170, Height: 40})
 	screen := ansi.Strip(m.View())
-	if !strings.Contains(screen, "⚠") || !strings.Contains(screen, "other flow: testdata/inbox.yaml") {
-		t.Errorf("run list should flag the other flow:\n%s", screen)
-	}
-	m.Update(press("2"))
-	m.Update(press("enter"))
-	screen = ansi.Strip(m.View())
-	if !strings.Contains(screen, "This run was recorded with testdata/inbox.yaml") || !strings.Contains(screen, "hunch tui testdata/inbox.yaml --runs") {
-		t.Errorf("opening it should explain and give the right command:\n%s", screen)
+	if len(m.runs) != 0 || !strings.Contains(screen, "Runs · 0 of this flow") ||
+		!strings.Contains(screen, "1 run(s) of testdata/inbox.yaml hidden") || !strings.Contains(screen, "hunch tui testdata/inbox.yaml --runs") {
+		t.Errorf("runs of another flow should be hidden and pointed to:\n%s", screen)
 	}
 
-	// With the right flow, no warning.
 	m2, _ := New("testdata/inbox.yaml", nil, "mock", false)
 	m2.SetRuns(runs)
-	m2.Update(tea.WindowSizeMsg{Width: 170, Height: 40})
-	m2.Update(press("2"))
-	m2.Update(press("enter"))
-	if strings.Contains(ansi.Strip(m2.View()), "⚠ This run was recorded") {
-		t.Error("a run from this flow must not be flagged")
+	if len(m2.runs) != 1 || len(m2.otherRuns) != 0 {
+		t.Errorf("the right flow lists its run: runs=%d others=%v", len(m2.runs), m2.otherRuns)
+	}
+}
+
+func TestRunOfOlderVersionIsMarked(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	os.WriteFile(path, []byte(`nodes: {a: {action: log, message: one, then: b}, b: {action: log, message: two}}`), 0o644)
+	f, _ := flow.Load(path)
+	runsPath := filepath.Join(dir, "runs.jsonl")
+	file, _ := os.Create(runsPath)
+	rec := trace.NewWriter(file)
+	rec.Start("r1", path, "", nil)
+	res, err := runner.Run(context.Background(), f, nil, runner.Options{OnEvent: func(ev runner.Event) { rec.Step("r1", ev) }})
+	rec.End("r1", res, err)
+	file.Close()
+
+	os.WriteFile(path, []byte(`nodes: {a: {action: log, message: one}}`), 0o644) // b removed
+	m, _ := New(path, nil, "", false)
+	m.SetRuns(runsPath)
+	m.Update(tea.WindowSizeMsg{Width: 170, Height: 40})
+	m.Update(press("2"))
+	m.Update(press("enter"))
+	screen := ansi.Strip(m.View())
+	if !strings.Contains(screen, "older version of this flow") {
+		t.Errorf("want older-version note:\n%s", screen)
 	}
 }

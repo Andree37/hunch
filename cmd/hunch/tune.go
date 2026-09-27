@@ -51,9 +51,13 @@ func cmdTune(ctx context.Context, args []string) error {
 	samples := map[string][]sample{}
 	var sources []string
 	if *runsFile != "" {
-		runs, err := trace.ReadAll(ctx, *runsFile)
+		all, err := trace.ReadAll(ctx, *runsFile)
 		if err != nil {
 			return err
+		}
+		runs, others := trace.OfFlow(all, path)
+		for flow, n := range others {
+			fmt.Fprintf(os.Stderr, "skipping %d run(s) recorded with %s\n", n, flow)
 		}
 		for _, r := range runs {
 			for _, ev := range r.Steps {

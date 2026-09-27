@@ -113,7 +113,8 @@ type Model struct {
 	runsPath    string // recorded runs: a file, a directory or s3://bucket/prefix
 	runsMod     time.Time
 	runsLoading bool
-	runs        []*trace.Run // newest first
+	runs        []*trace.Run   // of this flow, newest first
+	otherRuns   map[string]int // runs of other flows in the same place, by flow
 	runCursor   int
 	showRuns    bool       // pane 2 lists runs instead of test cases
 	replay      *trace.Run // recorded run shown in the views

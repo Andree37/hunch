@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -331,4 +332,32 @@ func ReadFiles(path string) ([]*Run, error) {
 		return runs, fmt.Errorf("%s: %w", path, err)
 	}
 	return runs, nil
+}
+
+// FromFlow reports whether the run was recorded with the flow file at path.
+// Runs that don't name their flow are assumed to match.
+func (r *Run) FromFlow(path string) bool {
+	if r.Flow == "" {
+		return true
+	}
+	a, err1 := filepath.Abs(r.Flow)
+	b, err2 := filepath.Abs(path)
+	if err1 != nil || err2 != nil {
+		return filepath.Clean(r.Flow) == filepath.Clean(path)
+	}
+	return a == b
+}
+
+// OfFlow splits runs into those recorded with the flow at path and a count
+// of the others by the flow they came from.
+func OfFlow(runs []*Run, path string) (mine []*Run, others map[string]int) {
+	others = map[string]int{}
+	for _, r := range runs {
+		if r.FromFlow(path) {
+			mine = append(mine, r)
+		} else {
+			others[r.Flow]++
+		}
+	}
+	return mine, others
 }

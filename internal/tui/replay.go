@@ -41,7 +41,10 @@ func (m *Model) loadRuns() error {
 	return nil
 }
 
+// setRuns keeps the runs recorded with this flow, newest first; runs of
+// other flows in the same place are only counted.
 func (m *Model) setRuns(runs []*trace.Run) {
+	runs, m.otherRuns = trace.OfFlow(runs, m.path)
 	slices.Reverse(runs) // newest first
 	prev := len(m.runs)
 	m.runs = runs
@@ -114,14 +117,14 @@ func (m *Model) openRun(i int) {
 	m.replay, m.replayK = tr, len(tr.Steps)
 	m.run = replayRun(tr, m.replayK)
 	m.flash = "opened run " + tr.ID
-	if m.otherFlow(tr) {
-		m.flash = "this run was recorded with " + flowName(tr) + ", not this flow"
+	if m.oldVersion(tr) {
+		m.flash = "recorded with an older version of this flow"
 	}
 }
 
-// otherFlow reports whether a recorded run came from a different flow than
-// the one open: it went through steps this flow doesn't have.
-func (m *Model) otherFlow(tr *trace.Run) bool {
+// oldVersion reports whether a run of this flow went through steps the flow
+// no longer has, i.e. it was recorded before the flow was edited.
+func (m *Model) oldVersion(tr *trace.Run) bool {
 	if m.flow == nil {
 		return false
 	}
@@ -138,25 +141,29 @@ func (m *Model) otherFlow(tr *trace.Run) bool {
 	return false
 }
 
-func flowName(tr *trace.Run) string {
-	if tr.Flow == "" {
-		return "another flow"
-	}
-	return tr.Flow
-}
-
-// otherFlowLines explains, above the graph, why a run from another flow
-// shows nothing, and how to open it properly.
-func (m *Model) otherFlowLines() []string {
-	if m.replay == nil || !m.otherFlow(m.replay) {
+// oldVersionLines explains, above the graph, why parts of an older run
+// don't show.
+func (m *Model) oldVersionLines() []string {
+	if m.replay == nil || !m.oldVersion(m.replay) {
 		return nil
 	}
 	return []string{
-		sYellow.Render("⚠ This run was recorded with " + flowName(m.replay) + ", not " + m.path + "."),
-		sYellow.Render("  Its steps don't exist here, so nothing below shows as run. Open it with:"),
-		"  " + sBold.Render("hunch tui "+flowName(m.replay)+" --runs "+m.runsPath),
+		sYellow.Render("⚠ This run was recorded with an older version of this flow."),
+		sYellow.Render("  Steps that no longer exist aren't shown; r runs its input on the flow as it is now."),
 		"",
 	}
+}
+
+// otherRunsLines says which runs in the same place belong to other flows,
+// and how to open them.
+func (m *Model) otherRunsLines() []string {
+	var lines []string
+	for _, flow := range slices.Sorted(maps.Keys(m.otherRuns)) {
+		lines = append(lines,
+			sDim.Render(fmt.Sprintf("%d run(s) of %s hidden; open them with:", m.otherRuns[flow], flow)),
+			sDim.Render("  hunch tui "+flow+" --runs "+m.runsPath))
+	}
+	return lines
 }
 
 // replaying reports whether the views show a recorded run.
@@ -199,7 +206,7 @@ func replayRun(tr *trace.Run, k int) *run {
 
 func (m *Model) runLines(w, h int) []string {
 	if len(m.runs) == 0 {
-		return []string{sDim.Render("no runs recorded in " + m.runsPath + " yet")}
+		return append([]string{sDim.Render("no runs of this flow in " + m.runsPath + " yet")}, m.otherRunsLines()...)
 	}
 	var lines []string
 	for i, tr := range m.runs {
@@ -222,9 +229,9 @@ func (m *Model) runLines(w, h int) []string {
 		if len(tr.Path) > 0 {
 			end = "→ " + tr.Path[len(tr.Path)-1]
 		}
-		if m.otherFlow(tr) {
+		if m.oldVersion(tr) {
 			icon = sYellow.Render("⚠")
-			end = "other flow: " + flowName(tr)
+			end += "  (older version of this flow)"
 		}
 		line := fmt.Sprintf("%s%s %s  %s  %s", marker, icon, sDim.Render(when), inputSummary(tr.Input), sDim.Render(end))
 		if m.replay == tr {
@@ -234,6 +241,9 @@ func (m *Model) runLines(w, h int) []string {
 	}
 	if top := m.runCursor - h + 1; top > 0 {
 		lines = lines[top:]
+	}
+	if others := m.otherRunsLines(); len(others) > 0 {
+		lines = append(append(lines, ""), others...)
 	}
 	return lines
 }
