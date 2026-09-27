@@ -73,6 +73,8 @@ func TestParseErrors(t *testing.T) {
 		"bad criteria":      "nodes: {n: {bool: x, criteria: {maybe: m}}}",
 		"empty switch":      "nodes: {n: {switch: \"\"}}",
 		"options on switch": "nodes: {n: {switch: x, options: [a, b]}}",
+		"sees on action":    "nodes: {n: {action: log, message: m, sees: [x]}}",
+		"sees not a list":   "nodes: {n: {bool: q, sees: {a: b}}}",
 		"typo in multi":     "nodes: {n: {questions: {a: {bool: x, optoins: [a, b]}}}}",
 	}
 	for name, src := range cases {

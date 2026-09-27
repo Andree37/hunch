@@ -58,6 +58,7 @@ nodes:
       sev2: "{{sla.sev2}}"
       sev2.5: "{{sla.sev2.5}}"
       sev3: "{{sla.sev3}}"
+    sees: [ticket.title, ticket.description, ticket.request, sla]
     threshold: 0.7
     then: {sev2: within_sla, unsure: for_human, _: lower_from_sev2}
 
@@ -70,6 +71,7 @@ nodes:
     options:
       sev2.5: "{{sla.sev2.5}}"
       sev3: "{{sla.sev3}}"
+    sees: [ticket.title, ticket.description, ticket.request, sla]
     threshold: 0.7
     then: {sev2.5: within_sla, unsure: for_human, _: lower_from_sev2_5}
 

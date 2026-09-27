@@ -149,7 +149,8 @@ type Node struct {
 	Kind      Kind
 	Questions []Question // one for bool/choice/score, several for questions
 	Action    *ActionSpec
-	Switch    string // template whose value picks the branch
+	Switch    string   // template whose value picks the branch
+	Sees      []string // decision nodes: state paths the backend is shown; nil means all
 	Backend   string
 	Threshold float64 // 0 means use the flow's threshold
 	Then      Routes
@@ -170,6 +171,10 @@ func (n *Node) Texts() []string {
 	}
 	if n.Switch != "" {
 		out = append(out, n.Switch)
+	}
+	// What a node sees must exist, so it's checked like any ref.
+	for _, p := range n.Sees {
+		out = append(out, "{{"+p+"}}")
 	}
 	if a := n.Action; a != nil {
 		out = append(out, a.Message, a.Run, a.Prompt, a.System, a.URL, a.IdempotencyKey)
@@ -406,7 +411,7 @@ func parseNodes(f *Flow, n *yaml.Node) error {
 var (
 	questionKeys = set("bool", "choice", "score", "options", "scale", "levels", "criteria")
 	nodeKeys     = set(append([]string{"bool", "choice", "score", "questions", "action", "switch",
-		"options", "scale", "levels", "criteria", "backend", "threshold", "then"}, actionOnly...)...)
+		"options", "scale", "levels", "criteria", "backend", "threshold", "then", "sees"}, actionOnly...)...)
 )
 
 func parseNode(id string, n *yaml.Node) (*Node, error) {
@@ -486,6 +491,17 @@ func parseNode(id string, n *yaml.Node) (*Node, error) {
 		node.Action = a
 	}
 
+	if v := fields["sees"]; v != nil {
+		if !kind.IsDecision() {
+			return nil, errAt(v, "node %q: only decision nodes take sees", id)
+		}
+		if err := v.Decode(&node.Sees); err != nil {
+			return nil, errAt(v, "node %q: sees: want a list of state paths, e.g. [record.title, kinds]", id)
+		}
+		if node.Sees == nil {
+			node.Sees = []string{} // `sees: []`: the question alone
+		}
+	}
 	if b := fields["backend"]; b != nil {
 		node.Backend = b.Value
 	}

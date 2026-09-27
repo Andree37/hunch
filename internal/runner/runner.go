@@ -39,6 +39,7 @@ type Event struct {
 	Kind      flow.Kind          `json:"kind"`
 	Backend   string             `json:"backend,omitempty"`
 	Asked     []string           `json:"asked,omitempty"` // question texts as sent
+	Saw       map[string]any     `json:"saw,omitempty"`   // state sent, when the node limits it with sees
 	Decisions []backend.Decision `json:"decisions,omitempty"`
 	Output    any                `json:"output"`
 	Branch    string             `json:"branch,omitempty"`
@@ -149,7 +150,15 @@ func decideNode(ctx context.Context, f *flow.Flow, n *flow.Node, state map[strin
 		ev.Asked = append(ev.Asked, q.Text)
 	}
 
-	resp, err := decide(ctx, b, state, qs)
+	shown := state
+	if n.Sees != nil {
+		var err error
+		if shown, err = seen(n.Sees, state); err != nil {
+			return err
+		}
+		ev.Saw = shown
+	}
+	resp, err := decide(ctx, b, shown, qs)
 	if err != nil {
 		return err
 	}
@@ -170,6 +179,24 @@ func decideNode(ctx context.Context, f *flow.Flow, n *flow.Node, state map[strin
 	ev.Output = decisionState(d)
 	ev.Branch, ev.Next, err = route(n, d, f.ThresholdFor(n))
 	return err
+}
+
+// seen picks the paths a node may see out of state, keyed by path. A path
+// ending in ? is optional.
+func seen(paths []string, state map[string]any) (map[string]any, error) {
+	out := make(map[string]any, len(paths))
+	for _, p := range paths {
+		path, optional := strings.CutSuffix(p, "?")
+		v, ok := tmpl.Lookup(state, path)
+		if !ok {
+			if optional {
+				continue
+			}
+			return nil, fmt.Errorf("sees %s, which isn't in state", path)
+		}
+		out[path] = v
+	}
+	return out, nil
 }
 
 // renderQuestion fills refs in a question's text, answer descriptions and

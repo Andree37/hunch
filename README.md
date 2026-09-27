@@ -77,6 +77,21 @@ nodes:
 Once an `output` node has run, later nodes can read everything set so far as
 `{{outputs.name}}`, whichever branch set it.
 
+### What a model sees
+
+By default a decision is shown the whole state: every input, constant and
+earlier answer. `sees:` limits it to the paths it needs, which saves tokens
+and keeps sensitive fields away from the model:
+
+```yaml
+check:
+  choice: "Which kind fits?"
+  sees: [record.title, record.body, kinds]   # quote optional ones: "record.notes?"
+```
+
+`sees: []` shows the question alone. Paths are checked like refs, and the
+TUI's Node pane lists exactly what was sent.
+
 ### Actions
 
 Decisions steer; actions do the work. Every action's result lands in state

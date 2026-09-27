@@ -252,6 +252,8 @@ func (m *Model) nodeLines(w int) []string {
 		return lines
 	}
 
+	lines = append(lines, m.seesLines(n, ev, ran, w)...)
+
 	var prevEv runner.Event
 	var hasPrev bool
 	if m.prev != nil {
@@ -298,6 +300,24 @@ func (m *Model) nodeLines(w int) []string {
 		lines = append(lines, sDim.Render(fmt.Sprintf("$%.6f · %s", ev.CostUSD, ev.Latency.Round(1e6))))
 	}
 	return lines
+}
+
+// seesLines says what the model is shown: everything, or the paths the
+// node limits it to, with the values that were actually sent.
+func (m *Model) seesLines(n *flow.Node, ev runner.Event, ran bool, w int) []string {
+	if n.Sees == nil {
+		return []string{sDim.Render("sees: everything in state"), ""}
+	}
+	if len(n.Sees) == 0 {
+		return []string{sDim.Render("sees: nothing but the question"), ""}
+	}
+	lines := []string{sDim.Render("sees: " + strings.Join(n.Sees, ", "))}
+	if ran {
+		for _, k := range slices.Sorted(maps.Keys(ev.Saw)) {
+			lines = append(lines, sDim.Render("  "+k+": ")+ansi.Truncate(tmpl.Format(ev.Saw[k]), max(w-len(k)-4, 10), "…"))
+		}
+	}
+	return append(lines, "")
 }
 
 // actionLines shows what an action does and, once it ran, everything it

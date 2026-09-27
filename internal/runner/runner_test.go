@@ -198,3 +198,55 @@ nodes:
 		t.Errorf("err = %v", err)
 	}
 }
+
+// recorder answers yes to everything and remembers the state it was shown.
+type recorder struct{ saw []map[string]any }
+
+func (r *recorder) Name() string       { return "rec" }
+func (r *recorder) Caps() backend.Caps { return backend.Caps{MultiQuestion: true} }
+func (r *recorder) Decide(_ context.Context, state map[string]any, qs []flow.Question) (backend.Response, error) {
+	r.saw = append(r.saw, state)
+	var out backend.Response
+	for _, q := range qs {
+		out.Decisions = append(out.Decisions, backend.Decision{QuestionID: q.ID, Kind: flow.Bool, Answer: true,
+			Probs: map[string]float64{"yes": 1, "no": 0}, Confidence: 1})
+	}
+	return out, nil
+}
+
+func TestSeesLimitsWhatTheModelGets(t *testing.T) {
+	f, err := flow.Parse([]byte(`
+state: {glossary: {a: "first letter"}, secret: "do not share"}
+nodes:
+  all: {bool: "q1", then: some}
+  some: {bool: "q2", sees: [record.title, glossary, "record.notes?"], then: none}
+  none: {bool: "q3", sees: []}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	res, err := Run(context.Background(), f, map[string]any{"record": map[string]any{"title": "T", "body": "B"}},
+		Options{Backends: map[string]backend.Backend{"mock": rec}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := rec.saw[0]["secret"]; !ok {
+		t.Error("a node without sees gets everything")
+	}
+	want := map[string]any{"record.title": "T", "glossary": map[string]any{"a": "first letter"}}
+	if len(rec.saw[1]) != 2 || rec.saw[1]["record.title"] != "T" || rec.saw[1]["glossary"] == nil {
+		t.Errorf("sees: got %v, want %v", rec.saw[1], want)
+	}
+	if len(rec.saw[2]) != 0 {
+		t.Errorf("sees: [] should show nothing, got %v", rec.saw[2])
+	}
+	_ = res
+
+	// A required path that's missing stops the run.
+	_, err = Run(context.Background(), f, map[string]any{"record": map[string]any{}},
+		Options{Backends: map[string]backend.Backend{"mock": rec}})
+	if err == nil || !strings.Contains(err.Error(), "sees record.title, which isn't in state") {
+		t.Errorf("err = %v", err)
+	}
+}
