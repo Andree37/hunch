@@ -108,6 +108,7 @@ type Model struct {
 	nodeScroll int
 
 	flowView flowView
+	live     bool // http nodes really send; off by default
 
 	flash         string
 	width, height int
@@ -392,6 +393,13 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.cursor = 0
 		m.selectNode(id)
+	case "L":
+		m.live = !m.live
+		if m.live {
+			m.flash = "LIVE: http nodes will really send"
+		} else {
+			m.flash = "dry run: http nodes only record their request"
+		}
 	case "b":
 		names := slices.Sorted(maps.Keys(m.flow.Backends))
 		i := slices.Index(names, m.backend)
@@ -660,6 +668,7 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 		res, err := runner.Run(ctx, &f, state, runner.Options{
 			Backends: backends,
 			Stdout:   io.Discard,
+			DryRun:   !m.live,
 			Before: func(ctx context.Context, node string) error {
 				if !stepMode.Load() {
 					return nil

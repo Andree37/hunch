@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strconv"
@@ -236,23 +237,7 @@ func (m *Model) nodeLines(w int) []string {
 	}
 
 	if n.Kind == flow.Action {
-		src := n.Action.Message
-		if n.Action.Type == "shell" {
-			src = "$ " + n.Action.Run
-		}
-		lines = append(lines, sDim.Render(src), "")
-		if ran {
-			if out, ok := ev.Output.(map[string]any); ok {
-				for _, k := range []string{"message", "stdout", "exit_code"} {
-					if v, ok := out[k]; ok {
-						lines = append(lines, sBold.Render(k)+"  "+tmpl.Format(v))
-					}
-				}
-			}
-		} else {
-			lines = append(lines, sDim.Render("not run"))
-		}
-		return lines
+		return append(lines, m.actionLines(n, ev, ran, w)...)
 	}
 
 	var prevEv runner.Event
@@ -299,6 +284,59 @@ func (m *Model) nodeLines(w int) []string {
 	}
 	if ran && ev.CostUSD > 0 {
 		lines = append(lines, sDim.Render(fmt.Sprintf("$%.6f · %s", ev.CostUSD, ev.Latency.Round(1e6))))
+	}
+	return lines
+}
+
+// actionLines shows what an action does and, once it ran, everything it
+// produced, with long text wrapped.
+func (m *Model) actionLines(n *flow.Node, ev runner.Event, ran bool, w int) []string {
+	a := n.Action
+	var lines []string
+	src := func(label, v string) {
+		if v != "" {
+			lines = append(lines, sDim.Render(label)+" "+slots(v))
+		}
+	}
+	switch a.Type {
+	case flow.ActLog:
+		src("say", a.Message)
+	case flow.ActShell:
+		src("$", a.Run)
+	case flow.ActLLM:
+		src("system", a.System)
+		src("prompt", a.Prompt)
+	case flow.ActHTTP:
+		src(a.Method, a.URL)
+	case flow.ActOutput:
+		for _, kv := range a.Set {
+			src(kv.Key+" =", kv.Value)
+		}
+	}
+	lines = append(lines, "")
+	if !ran {
+		return append(lines, sDim.Render("not run"))
+	}
+	out, _ := ev.Output.(map[string]any)
+	if out["dry_run"] == true {
+		lines = append(lines, sYellow.Render("dry run: nothing was sent"), "")
+	}
+	for _, k := range slices.Sorted(maps.Keys(out)) {
+		if k == "dry_run" {
+			continue
+		}
+		v := tmpl.Format(out[k])
+		if len(v) > w-len(k)-2 || strings.Contains(v, "\n") {
+			lines = append(lines, sBold.Render(k))
+			for _, para := range strings.Split(v, "\n") {
+				lines = append(lines, wrap(para, w)...)
+			}
+			continue
+		}
+		lines = append(lines, sBold.Render(k)+"  "+v)
+	}
+	if ev.CostUSD > 0 {
+		lines = append(lines, "", sDim.Render(fmt.Sprintf("$%.6f · %s", ev.CostUSD, ev.Latency.Round(1e6))))
 	}
 	return lines
 }
@@ -498,6 +536,14 @@ func preview(v string) string {
 	return first + sDim.Render(fmt.Sprintf(" ⏎ +%d lines", strings.Count(rest, "\n")+1))
 }
 
+// modeLabel says whether http nodes would really send.
+func (m *Model) modeLabel() string {
+	if m.live {
+		return sRed.Bold(true).Render("LIVE")
+	}
+	return sYellow.Render("dry run")
+}
+
 func (m *Model) flowTitle() string {
 	if m.flowView == viewPath && m.run != nil && len(m.run.path) > 0 {
 		return "[1] Flow · path  (v graph)"
@@ -584,10 +630,10 @@ func (m *Model) statusBar() string {
 	case m.focus == focusNode:
 		left = " j/k scroll · r run · s step · 1-4 panes · q quit"
 	default:
-		left = " j/k select · r run · s step · v graph/path · b backend · 1-4 panes · q quit"
+		left = " j/k select · r run · s step · v graph/path · b backend · L live/dry · 1-4 panes · q quit"
 	}
 
-	right := "backend " + m.backend
+	right := "backend " + m.backend + " · " + m.modeLabel()
 	if r := m.run; r != nil {
 		switch {
 		case r.paused != "":

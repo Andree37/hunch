@@ -18,6 +18,8 @@ var (
 	pink   = lipgloss.Color("#FF69B4")
 	orange = lipgloss.Color("#FFA07A")
 	blue   = lipgloss.Color("#74B9FF")
+	violet = lipgloss.Color("#9B8CFF")
+	white  = lipgloss.Color("#DDD6FE")
 
 	sInk  = lipgloss.NewStyle().Foreground(lipgloss.Color("#1A202C")).Bold(true)
 	sSlot = lipgloss.NewStyle().Foreground(lilac).Italic(true)
@@ -34,8 +36,15 @@ func kindStyle(n *flow.Node) (label string, c lipgloss.Color) {
 	case flow.Questions:
 		return "MULTI", blue
 	}
-	if n.Action.Type == "shell" {
+	switch n.Action.Type {
+	case flow.ActShell:
 		return "SHELL", lilac
+	case flow.ActLLM:
+		return "LLM", violet
+	case flow.ActHTTP:
+		return "HTTP", yellow
+	case flow.ActOutput:
+		return "OUTPUT", white
 	}
 	return "SAY", green
 }
@@ -144,24 +153,56 @@ func meter(sc flow.Scale, v float64) string {
 // its template with the {{placeholders}} marked as slots to be filled.
 func actionView(a *flow.ActionSpec, ev runner.Event, ran bool) string {
 	out, _ := ev.Output.(map[string]any)
-	if a.Type == "shell" {
+	switch a.Type {
+	case flow.ActShell:
 		if !ran {
 			return sDim.Render("$ ") + slots(a.Run)
 		}
 		code, _ := out["exit_code"].(int)
-		result := tmpl.Format(out["stdout"])
-		if first, _, _ := strings.Cut(result, "\n"); first != result {
-			result = first + " …"
-		}
+		result := firstLine(tmpl.Format(out["stdout"]))
 		if code != 0 {
 			return sRed.Render(fmt.Sprintf("exit %d ", code)) + result
 		}
 		return sGreen.Render("✓ ") + result
+	case flow.ActLLM:
+		if !ran {
+			return slots(a.Prompt)
+		}
+		return lipgloss.NewStyle().Foreground(violet).Render("✎ ") + firstLine(tmpl.Format(out["text"]))
+	case flow.ActHTTP:
+		if !ran {
+			return sDim.Render(a.Method+" ") + slots(a.URL)
+		}
+		if out["dry_run"] == true {
+			return sYellow.Render("DRY RUN ") + sDim.Render(fmt.Sprintf("%v %v", out["method"], out["url"]))
+		}
+		status, _ := out["status"].(int)
+		if status >= 300 {
+			return sRed.Render(fmt.Sprintf("✗ %d", status))
+		}
+		return sGreen.Render(fmt.Sprintf("✓ %d ", status)) + sDim.Render(a.Method)
+	case flow.ActOutput:
+		parts := make([]string, len(a.Set))
+		for i, kv := range a.Set {
+			v := slots(kv.Value)
+			if ran {
+				v = tmpl.Format(out[kv.Key])
+			}
+			parts[i] = sDim.Render(kv.Key+"=") + v
+		}
+		return strings.Join(parts, sDim.Render(" · "))
 	}
 	if ran {
 		return fmt.Sprintf("%q", tmpl.Format(out["message"]))
 	}
 	return slots(a.Message)
+}
+
+func firstLine(s string) string {
+	if first, _, more := strings.Cut(s, "\n"); more {
+		return first + " …"
+	}
+	return s
 }
 
 // slots renders a template dim, with each {{ref}} shown as a ⟨ref⟩ slot.

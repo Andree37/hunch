@@ -358,3 +358,37 @@ func TestPathView(t *testing.T) {
 		t.Errorf("back to graph should keep selection, got %q", m.selected().ID)
 	}
 }
+
+func TestActionNodesAndDryRun(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f.yaml")
+	os.WriteFile(path, []byte(`backends: {m: {kind: mock, answers: {ok: yes}}}
+nodes:
+  draft: {action: llm, prompt: "Reply to {{who}}", then: ok}
+  ok: {bool: "Send it?", then: {yes: send, no: result}}
+  send: {action: http, url: "https://example.invalid/post", body: {text: "{{draft.text}}"}, then: result}
+  result: {action: output, set: {action: sent, to: "{{who}}"}}
+`), 0o644)
+	m, err := New(path, map[string]any{"who": "ann"}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if bar := ansi.Strip(m.statusBar()); !strings.Contains(bar, "dry run") {
+		t.Errorf("default should be dry run: %s", bar)
+	}
+	_, cmd := m.Update(press("r"))
+	drive(t, m, cmd)
+	if m.run.err != nil {
+		t.Fatal(m.run.err)
+	}
+	screen := ansi.Strip(m.View())
+	for _, want := range []string{"LLM     draft", "✎ [mock text", "HTTP    send", "DRY RUN POST https://example.invalid", "OUTPUT  result", "action=sent · to=ann"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("screen missing %q:\n%s", want, screen)
+		}
+	}
+	m.Update(press("L"))
+	if !m.live || !strings.Contains(ansi.Strip(m.statusBar()), "LIVE") {
+		t.Error("L should switch to live")
+	}
+}
