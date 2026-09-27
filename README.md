@@ -228,17 +228,24 @@ curl -H "Authorization: Bearer $HOOK_TOKEN" \
 - Inputs are checked like everywhere else; bad or missing ones get a 400.
 - Live by default; `--dry-run` records writes instead of sending them.
 - A failed run returns 500 with the error and `failed_at` node.
-- `--trace file.jsonl` keeps every run's events, rolling over at
-  `--trace-max-mb` (100) and keeping 3 old files, which `hunch tui --runs`
-  reads too; `GET /healthz` for checks.
+- `--trace` records every run (see [Recording and replaying runs](#recording-and-replaying-runs));
+  `GET /healthz` for checks.
 - **Duplicates**: webhook senders retry. With `--dedupe-key '{{record.id}}'`,
   or when the sender sends an `Idempotency-Key` header, a repeat of a
   finished run gets that run's reply (marked `"duplicate": true`) without
   running again, and a repeat of one still running gets 409. Failed runs
   aren't remembered, so a retry runs them again. Remembered for
-  `--dedupe-ttl` (24h); add `--dedupe-file seen.jsonl` to keep that memory
-  across restarts and deploys. It's per process: with several copies of
-  serve behind a load balancer, each has its own.
+  `--dedupe-ttl` (24h), in memory unless you give `--dedupe-store`:
+  - `--dedupe-store ./dedupe/` or `--dedupe-store s3://bucket/dedupe/` keeps
+    one object per key, so the memory survives restarts and is **shared by
+    every serve using the same store**: several tasks behind a load balancer
+    run each delivery exactly once. Claims are atomic (create-if-absent on
+    disk, S3 conditional writes).
+  - A claim left "running" by a serve that died is taken over after
+    `--timeout` + 1 minute.
+  - If the store can't be reached, the webhook gets 503 so the sender retries,
+    rather than risk running it twice. Set an S3 lifecycle rule on the prefix
+    to clean up old entries.
 - **Load**: at most `--max-concurrent` (4) runs at once; others wait up to 30s,
   then get 503 with `Retry-After`.
 - **Runs finish** even if the sender hangs up, bounded by `--timeout` (5m), so
@@ -248,17 +255,27 @@ curl -H "Authorization: Bearer $HOOK_TOKEN" \
 
 ## Recording and replaying runs
 
-`--trace file.jsonl` on `hunch run` or `hunch serve` records every run: its
-input, each step (question as asked, what the model saw, probabilities,
-route, cost), and how it ended. Open the recording in the TUI:
+`--trace` on `hunch run` or `hunch serve` records every run: its input, each
+step (question as asked, what the model saw, probabilities, route, cost), and
+how it ended. It goes where you point it:
+
+| `--trace` | Stored as |
+|---|---|
+| `runs.jsonl` | one file, appended to, rolling over at `--trace-max-mb` (100) and keeping 3 old files |
+| `./runs/` | one file per run, named by start time: `2026-09-27/18-17-19.123-<id>.jsonl` |
+| `s3://bucket/runs/` | the same, as S3 objects (credentials and region from the usual AWS chain; `?region=` overrides) |
+
+One object per run means several serve tasks never write over each other.
+Open the recordings in the TUI from any of the three:
 
 ```sh
-hunch serve examples/respond.yaml --trace runs.jsonl     # production
-hunch tui examples/respond.yaml --runs runs.jsonl        # look at what happened
+hunch serve examples/respond.yaml --trace s3://my-bucket/runs/   # production
+hunch tui examples/respond.yaml --runs s3://my-bucket/runs/      # look at what happened
 ```
 
 - Pane 2 lists the recorded runs, newest first (`t` switches to test cases);
-  it updates while serve keeps recording.
+  it updates while serve keeps recording (a file on change; a directory or
+  S3 every 10s, in the background).
 - Enter loads a run into the graph and path views, with its input in pane 4.
 - `s` replays it one step at a time, exactly as it happened; `r` runs the same
   input again live, e.g. after changing the flow, to see if it now goes the
@@ -414,5 +431,5 @@ Keys: `j/k` move · `tab` next pane · `enter` edit / load case · `r` run (noth
 - `hunch tui FLOW [--backend name] [--set k=v]... [--state f.json] [--runs file.jsonl]`
 - `hunch test FLOW [--backend name] [--live] [case...]`: run test cases, check expectations. `http` nodes don't send unless `--live`.
 - `hunch tune FLOW [--runs file.jsonl] [--backend name] [--no-tests] [--all]`: see what each threshold would do.
-- `hunch serve FLOW [--addr host:port] [--backend name] [--dry-run] [--token-env VAR] [--trace file]`: run the flow for each webhook POST.
+- `hunch serve FLOW [--addr host:port] [--backend name] [--writer name] [--dry-run] [--token-env VAR] [--trace file|dir|s3://...] [--dedupe-key T] [--dedupe-store dir|s3://...]`: run the flow for each webhook POST.
 - `hunch run FLOW [--backend name] [--case name] [--set k=v]... [--state f.json] [--trace f.jsonl] [--json] [--max-visits N]`

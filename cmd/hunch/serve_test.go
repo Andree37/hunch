@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/Andree37/hunch/internal/backend"
 	"github.com/Andree37/hunch/internal/flow"
+	"github.com/Andree37/hunch/internal/store"
 	"github.com/Andree37/hunch/internal/trace"
 )
 
@@ -34,7 +37,7 @@ backends: {m: {kind: mock, answers: {check: yes}}}
 	}
 	b, _ := backend.New(f.Backends["m"])
 	return &server{flow: f, backends: map[string]backend.Backend{"m": b}, token: token, timeout: 5 * time.Second,
-		seen: newDedupe(time.Hour), slots: make(chan struct{}, 4)}
+		seen: newMemDedupe(time.Hour), slots: make(chan struct{}, 4)}
 }
 
 func post(t *testing.T, s *server, body, auth string) (int, runReply) {
@@ -179,7 +182,7 @@ func TestServeFailedRunCanBeRetried(t *testing.T) {
 func TestServeInProgressAndBusy(t *testing.T) {
 	s := testServer(t, "")
 	s.dedupeKey = "{{order.id}}"
-	s.seen.begin("5") // as if a run for order 5 were in flight
+	s.seen.begin(context.Background(), "5") // as if a run for order 5 were in flight
 	if code, reply := post(t, s, `{"plan": "free", "order": {"id": 5}}`, ""); code != 409 || !reply.Duplicate {
 		t.Errorf("in progress: code=%d reply=%+v", code, reply)
 	}
@@ -193,7 +196,7 @@ func TestServeInProgressAndBusy(t *testing.T) {
 	if rec.Code != 503 || rec.Header().Get("Retry-After") == "" {
 		t.Errorf("busy: code=%d retry-after=%q", rec.Code, rec.Header().Get("Retry-After"))
 	}
-	if _, running, _ := s.seen.begin("6"); running {
+	if _, running, _, _ := s.seen.begin(context.Background(), "6"); running {
 		t.Error("a request turned away as busy must not stay claimed")
 	}
 }
@@ -204,7 +207,7 @@ func TestServeReloadsFlow(t *testing.T) {
 		os.WriteFile(path, []byte(`nodes: {done: {action: output, set: {action: `+action+`}}}`), 0o644)
 	}
 	write("first")
-	s := &server{path: path, seen: newDedupe(time.Hour), slots: make(chan struct{}, 1), timeout: time.Second}
+	s := &server{path: path, seen: newMemDedupe(time.Hour), slots: make(chan struct{}, 1), timeout: time.Second}
 	if err := s.load(); err != nil {
 		t.Fatal(err)
 	}
@@ -227,45 +230,75 @@ func TestServeReloadsFlow(t *testing.T) {
 	}
 }
 
-func TestServeDedupeSurvivesRestart(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "seen.jsonl")
+func TestServeDedupeSharedThroughAStore(t *testing.T) {
+	dir := t.TempDir()
 	body := `{"plan": "pro", "order": {"id": 42, "note": "refund please"}}`
-
-	first := testServer(t, "")
-	first.dedupeKey = "{{order.id}}"
-	if _, err := first.seen.persist(file); err != nil {
-		t.Fatal(err)
+	shared := func() (*server, *bytes.Buffer) {
+		s := testServer(t, "")
+		s.dedupeKey = "{{order.id}}"
+		s.seen = &storeDedupe{st: store.Dir(dir), ttl: time.Hour, stale: time.Minute}
+		var buf bytes.Buffer
+		s.trace = trace.NewWriter(&buf)
+		return s, &buf
 	}
-	if code, _ := post(t, first, body, ""); code != 200 {
-		t.Fatalf("first run: %d", code)
+	first, firstRuns := shared()
+	if code, _ := post(t, first, body, ""); code != 200 || runs(firstRuns) != 1 {
+		t.Fatalf("first: %d, runs %d", code, runs(firstRuns))
 	}
-
-	// A new process: same file, fresh memory.
-	second := testServer(t, "")
-	second.dedupeKey = "{{order.id}}"
-	var buf bytes.Buffer
-	second.trace = trace.NewWriter(&buf)
-	n, err := second.seen.persist(file)
-	if err != nil || n != 1 {
-		t.Fatalf("reloaded %d, %v", n, err)
-	}
+	// Another serve on the same store (a second task, or after a restart).
+	second, secondRuns := shared()
 	code, reply := post(t, second, body, "")
-	if code != 200 || !reply.Duplicate || reply.Outputs["action"] != "refund" || runs(&buf) != 0 {
-		t.Errorf("after restart: code=%d reply=%+v runs=%d", code, reply, runs(&buf))
+	if code != 200 || !reply.Duplicate || reply.Outputs["action"] != "refund" || runs(secondRuns) != 0 {
+		t.Errorf("second serve: code=%d reply=%+v runs=%d", code, reply, runs(secondRuns))
 	}
 }
 
-func TestDedupeFileDropsExpired(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "seen.jsonl")
-	old, _ := json.Marshal(savedReply{Key: "old", At: time.Now().Add(-48 * time.Hour)})
-	fresh, _ := json.Marshal(savedReply{Key: "new", At: time.Now()})
-	os.WriteFile(file, []byte(string(old)+"\n"+string(fresh)+"\n"), 0o644)
-	d := newDedupe(24 * time.Hour)
-	if n, err := d.persist(file); err != nil || n != 1 {
-		t.Fatalf("kept %d, %v", n, err)
+func TestStoreDedupe(t *testing.T) {
+	ctx := context.Background()
+	d := &storeDedupe{st: store.Dir(t.TempDir()), ttl: time.Hour, stale: time.Minute}
+	if _, _, fresh, err := d.begin(ctx, "k"); !fresh || err != nil {
+		t.Fatalf("first claim: fresh=%v err=%v", fresh, err)
 	}
-	data, _ := os.ReadFile(file)
-	if strings.Contains(string(data), `"old"`) {
-		t.Errorf("expired entry should be compacted away: %s", data)
+	if _, running, fresh, _ := d.begin(ctx, "k"); fresh || !running {
+		t.Errorf("while running: fresh=%v running=%v", fresh, running)
+	}
+	d.finish(ctx, "k", runReply{Outputs: map[string]any{"a": "b"}})
+	if prev, running, fresh, _ := d.begin(ctx, "k"); fresh || running || prev.Outputs["a"] != "b" {
+		t.Errorf("after finish: %+v running=%v fresh=%v", prev, running, fresh)
+	}
+	d.forget(ctx, "k")
+	if _, _, fresh, _ := d.begin(ctx, "k"); !fresh {
+		t.Error("forgotten key should be claimable")
+	}
+
+	// Abandoned claims and expired replies can be taken over.
+	old, _ := json.Marshal(dedupeEntry{Running: true, At: time.Now().Add(-2 * time.Minute)})
+	d.st.Put(ctx, objectKey("crashed"), old)
+	if _, _, fresh, _ := d.begin(ctx, "crashed"); !fresh {
+		t.Error("a claim older than stale should be taken over")
+	}
+	expired, _ := json.Marshal(dedupeEntry{At: time.Now().Add(-2 * time.Hour)})
+	d.st.Put(ctx, objectKey("expired"), expired)
+	if _, _, fresh, _ := d.begin(ctx, "expired"); !fresh {
+		t.Error("a reply older than ttl should be forgotten")
+	}
+}
+
+// brokenStore fails every call, like S3 being unreachable.
+type brokenStore struct{ store.Dir }
+
+func (brokenStore) Create(context.Context, string, []byte) error {
+	return errors.New("connection refused")
+}
+
+func TestServeRefusesWhenDedupeUnavailable(t *testing.T) {
+	s := testServer(t, "")
+	s.dedupeKey = "{{order.id}}"
+	s.seen = &storeDedupe{st: brokenStore{store.Dir(t.TempDir())}, ttl: time.Hour, stale: time.Minute}
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"plan": "pro", "order": {"id": 1, "note": "x"}}`))
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != 503 || rec.Header().Get("Retry-After") == "" {
+		t.Errorf("code=%d; must not run when it can't check for duplicates", rec.Code)
 	}
 }

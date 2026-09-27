@@ -19,6 +19,7 @@ import (
 	"github.com/Andree37/hunch/internal/backend"
 	"github.com/Andree37/hunch/internal/flow"
 	"github.com/Andree37/hunch/internal/runner"
+	"github.com/Andree37/hunch/internal/store"
 	"github.com/Andree37/hunch/internal/tmpl"
 	"github.com/Andree37/hunch/internal/trace"
 )
@@ -38,7 +39,7 @@ func cmdServe(ctx context.Context, args []string) error {
 	dedupeKey := fs.String("dedupe-key", "", "template naming a run from its input, e.g. '{{record.id}}'; repeats of a finished run get its reply without running again")
 	dedupeTTL := fs.Duration("dedupe-ttl", 24*time.Hour, "how long a finished run's reply is remembered for duplicates")
 	maxConcurrent := fs.Int("max-concurrent", 4, "runs at once; more wait up to 30s, then get 503")
-	dedupeFile := fs.String("dedupe-file", "", "keep finished runs' replies in this file so duplicates are still caught after a restart")
+	dedupeStore := fs.String("dedupe-store", "", "remember runs in a directory or s3://bucket/prefix, shared by every serve using it and kept across restarts (default: in memory)")
 	traceMaxMB := fs.Int("trace-max-mb", 100, "roll a .jsonl trace file over at this size, keeping 3 old ones (0 = never)")
 	path, err := parseArgs(fs, args)
 	if err != nil {
@@ -52,18 +53,21 @@ func cmdServe(ctx context.Context, args []string) error {
 		dryRun:    *dryRun,
 		timeout:   *timeout,
 		dedupeKey: *dedupeKey,
-		seen:      newDedupe(*dedupeTTL),
+		seen:      newMemDedupe(*dedupeTTL),
 		slots:     make(chan struct{}, max(*maxConcurrent, 1)),
 	}
 	if err := h.load(); err != nil {
 		return err
 	}
-	if *dedupeFile != "" {
-		n, err := h.seen.persist(*dedupeFile)
+	if *dedupeStore != "" {
+		st, err := store.Open(ctx, *dedupeStore)
 		if err != nil {
 			return err
 		}
-		log.Printf("dedupe: %d finished runs remembered from %s", n, *dedupeFile)
+		// A run still "running" after the longest a run can take belonged
+		// to a serve that died; it may be taken over.
+		h.seen = &storeDedupe{st: st, ttl: *dedupeTTL, stale: *timeout + time.Minute}
+		log.Printf("dedupe: remembering runs in %s", st)
 	}
 	var token string
 	if *tokenEnv != "" {
@@ -109,7 +113,7 @@ type server struct {
 	token     string
 	timeout   time.Duration
 	dedupeKey string
-	seen      *dedupe
+	seen      dedupe
 	slots     chan struct{} // one per run allowed at once
 	busyWait  time.Duration // how long a request waits for a slot; 0 means 30s
 
@@ -233,8 +237,15 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		key = k
 	}
 	if key != "" {
-		prev, running, fresh := s.seen.begin(key)
+		prev, running, fresh, err := s.seen.begin(r.Context(), key)
 		switch {
+		case err != nil:
+			// Without knowing whether it already ran, running it could do
+			// it twice; the sender will retry.
+			log.Printf("dedupe: %v", err)
+			w.Header().Set("Retry-After", "10")
+			writeJSON(w, http.StatusServiceUnavailable, runReply{Error: "duplicate check unavailable, try again later"})
+			return
 		case running:
 			writeJSON(w, http.StatusConflict, runReply{Error: "a run for " + key + " is already in progress", Duplicate: true})
 			return
@@ -255,12 +266,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case s.slots <- struct{}{}:
 		defer func() { <-s.slots }()
 	case <-time.After(wait):
-		s.seen.forget(key)
+		s.seen.forget(r.Context(), key)
 		w.Header().Set("Retry-After", "30")
 		writeJSON(w, http.StatusServiceUnavailable, runReply{Error: "busy, try again later"})
 		return
 	case <-r.Context().Done():
-		s.seen.forget(key)
+		s.seen.forget(r.Context(), key)
 		return
 	}
 
@@ -289,9 +300,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if key != "" {
 		// Only finished runs are remembered; a failed one may be retried.
 		if err == nil {
-			s.seen.finish(key, reply)
+			s.seen.finish(ctx, key, reply)
 		} else {
-			s.seen.forget(key)
+			s.seen.forget(ctx, key)
 		}
 	}
 	log.Printf("%d %s · %s · $%.6f · %s", status, strings.Join(res.Path, " → "),
@@ -313,104 +324,4 @@ func formatOutputs(outputs map[string]any) string {
 	return string(data)
 }
 
-// dedupe remembers runs by key: in progress, or finished with their reply.
-type dedupe struct {
-	mu      sync.Mutex
-	ttl     time.Duration
-	entries map[string]*dedupeEntry
-	file    *os.File // finished runs are appended here when persisting
-}
-
-// savedReply is one line of the dedupe file.
-type savedReply struct {
-	Key   string    `json:"key"`
-	At    time.Time `json:"at"`
-	Reply runReply  `json:"reply"`
-}
-
-// persist loads finished runs from path (dropping expired ones, which also
-// compacts the file) and appends every run that finishes from now on.
-func (d *dedupe) persist(path string) (int, error) {
-	var kept []savedReply
-	if data, err := os.ReadFile(path); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			var r savedReply
-			if line == "" || json.Unmarshal([]byte(line), &r) != nil || time.Since(r.At) > d.ttl {
-				continue
-			}
-			kept = append(kept, r)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return 0, err
-	}
-	tmp := path + ".tmp"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return 0, err
-	}
-	enc := json.NewEncoder(f)
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for _, r := range kept {
-		d.entries[r.Key] = &dedupeEntry{reply: r.Reply, at: r.At}
-		enc.Encode(r)
-	}
-	if err := f.Close(); err != nil {
-		return 0, err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return 0, err
-	}
-	if d.file, err = os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644); err != nil {
-		return 0, err
-	}
-	return len(kept), nil
-}
-
-type dedupeEntry struct {
-	running bool
-	reply   runReply
-	at      time.Time
-}
-
-func newDedupe(ttl time.Duration) *dedupe {
-	return &dedupe{ttl: ttl, entries: map[string]*dedupeEntry{}}
-}
-
-// begin claims key. fresh means the caller should run; otherwise the key is
-// either running or finished with prev as its reply.
-func (d *dedupe) begin(key string) (prev runReply, running, fresh bool) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for k, e := range d.entries {
-		if !e.running && time.Since(e.at) > d.ttl {
-			delete(d.entries, k)
-		}
-	}
-	if e, ok := d.entries[key]; ok {
-		return e.reply, e.running, false
-	}
-	d.entries[key] = &dedupeEntry{running: true, at: time.Now()}
-	return runReply{}, false, true
-}
-
-func (d *dedupe) finish(key string, reply runReply) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	now := time.Now()
-	d.entries[key] = &dedupeEntry{reply: reply, at: now}
-	if d.file != nil {
-		if err := json.NewEncoder(d.file).Encode(savedReply{Key: key, At: now, Reply: reply}); err != nil {
-			log.Printf("dedupe file: %v", err)
-		}
-	}
-}
-
-func (d *dedupe) forget(key string) {
-	if key == "" {
-		return
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	delete(d.entries, key)
-}
+func logf(format string, args ...any) { log.Printf(format, args...) }

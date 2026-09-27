@@ -28,11 +28,11 @@ const usage = `hunch: decision flows with typed, calibrated answers
 usage:
   hunch validate FLOW
   hunch tui FLOW [--backend name] [--writer name] [--set key=value]... [--state file.json] [--runs file.jsonl]
-  hunch run FLOW [--backend name] [--writer name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl] [--json] [--dry-run]
+  hunch run FLOW [--backend name] [--writer name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl|dir|s3://b/p] [--json] [--dry-run]
   hunch test FLOW [--backend name] [--writer name] [--live] [name...]
   hunch tune FLOW [--runs file.jsonl] [--backend name] [--writer name] [--no-tests] [--all]
-  hunch serve FLOW [--addr 127.0.0.1:8080] [--backend name] [--writer name] [--dry-run] [--token-env VAR] [--trace file.jsonl]
-             [--dedupe-key '{{record.id}}'] [--dedupe-file seen.jsonl] [--max-concurrent 4]
+  hunch serve FLOW [--addr 127.0.0.1:8080] [--backend name] [--writer name] [--dry-run] [--token-env VAR] [--trace file.jsonl|dir|s3://b/p]
+             [--dedupe-key '{{record.id}}'] [--dedupe-store dir|s3://b/p] [--max-concurrent 4]
              [--timeout 5m] [--trace-max-mb 100]
 
 http nodes that write send for real in run and serve (unless --dry-run) and
