@@ -308,12 +308,18 @@ hunch tune examples/severity.yaml --runs runs.jsonl --backend jev
 
 `examples/ticketdesk` is a toy ticket system that sends a webhook when a
 ticket is created and accepts severity changes and comments. The demo wires it
-to `hunch serve` running `examples/severity.yaml`: Jev decides the severity, a
-local Ollama model writes the note, and Jev checks the note before it goes on
-the ticket (a plain note is used if it's off).
+to `hunch serve` running `examples/severity.yaml`:
+
+1. Jev decides the severity (it can only stay or go down).
+2. Jev establishes the facts the SLA cares about in one multi-question call:
+   core feature down? workaround? how many users? what kind of ticket?
+3. A second model, a local Ollama model (the `notes` backend), writes the note
+   from the SLA, the decision and those facts.
+4. Jev checks the note before it goes on the ticket; if it's off, a plain note
+   built from the facts is posted instead.
 
 ```sh
-ollama pull qwen2.5:0.5b && ollama serve   # the writer
+ollama pull qwen2.5:1.5b && ollama serve   # the note model
 examples/ticketdesk/demo.sh                # needs TYPESAFE_API_KEY in .env
 ```
 
@@ -322,6 +328,7 @@ It creates five tickets and prints what happened to each:
 ```
 #1 [sev3] Logo slightly blurry on the settings page
     created as sev2 · severity sev2 → sev3 · comment added
+    comment: Severity moved from sev2 to sev3 under our SLA. Kind: cosmetic · core feature down: no · workaround: no · users affected: some.
 #2 [sev2] Checkout fails for all EU customers
     created as sev2
 #3 [sev3] How do I change my invoice email?

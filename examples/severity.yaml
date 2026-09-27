@@ -20,6 +20,8 @@ backends:
   writer: local       # writes the note on the ticket
   # A model on this machine via Ollama (ollama pull qwen2.5:0.5b).
   local: {kind: openai, base_url: "http://localhost:11434/v1", model: "qwen2.5:0.5b"}
+  # The model that writes the note on the ticket; swap it on its own.
+  notes: {kind: openai, base_url: "http://localhost:11434/v1", model: "qwen2.5:1.5b"}
   mock: {kind: mock, seed: demo}
   jev: {kind: jev, provider: typesafe}
   claude: {kind: anthropic, model: claude-opus-5}
@@ -82,41 +84,72 @@ nodes:
 
   lower_from_sev2:
     action: output
-    set: {action: lowered, from: sev2, to: "{{from_sev2.answer}}"}
-    then: explain
+    set: {action: lowered, from: sev2, to: "{{from_sev2.answer}}", confidence: "{{from_sev2.confidence}}"}
+    then: facts
 
   lower_from_sev2_5:
     action: output
-    set: {action: lowered, from: sev2.5, to: "{{from_sev2_5.answer}}"}
+    set: {action: lowered, from: sev2.5, to: "{{from_sev2_5.answer}}", confidence: "{{from_sev2_5.confidence}}"}
+    then: facts
+
+  # Establish, against the SLA, the facts the note should rest on. The note
+  # model then only has to phrase them.
+  facts:
+    questions:
+      core_down:
+        bool: "Is a core feature down or badly degraded?"
+        criteria: {yes: "Customers can't use a main part of the product", no: "Main features work"}
+      workaround:
+        bool: "Is there a workaround?"
+        criteria: {yes: "The customer can still get it done another way", no: "No way around it"}
+      reach:
+        choice: "How many users are affected?"
+        options: {one: "Only this customer or one user", some: "A group of customers", many: "Most or all customers"}
+      kind:
+        choice: "What kind of ticket is this?"
+        options:
+          outage: "Something broken for many"
+          bug: "Something broken for some"
+          cosmetic: "Looks wrong but works"
+          question: "Asking how to do something"
+          request: "Asking for a change or feature"
+    sees: [fetch.body.title, fetch.body.description, fetch.body.request]
     then: explain
 
   explain:
     action: llm
+    backend: notes
     system: >-
       You write one short internal note for a support ticket explaining a
-      severity change. You do not answer the customer, give instructions or
-      apologise. You only explain why the new severity fits.
+      severity change. Use only the facts given. Do not answer the customer,
+      give instructions or apologise.
     prompt: |-
-      Our SLA defines severities as:
+      Our SLA:
       - sev2: {{sla.sev2}}
       - sev2.5: {{sla.sev2.5}}
       - sev3: {{sla.sev3}}
 
       Ticket: {{fetch.body.title}}
-      {{fetch.body.description}}
+      Decision: moved from {{outputs.from}} to {{outputs.to}}.
 
-      It is being moved from {{outputs.from}} to {{outputs.to}}. In one or two
-      sentences, say why it fits {{outputs.to}} rather than {{outputs.from}}.
+      Facts:
+      - Core feature down: {{facts.core_down.answer}}
+      - Workaround exists: {{facts.workaround.answer}}
+      - Users affected: {{facts.reach.answer}}
+      - Kind of ticket: {{facts.kind.answer}}
+
+      Write one or two sentences for the ticket saying why it is {{outputs.to}}
+      and not {{outputs.from}}, citing the facts that match the SLA.
     then: note_ok
 
-  # The writer is a small local model: check its note before it goes on the
+  # The note model may be small: check its note before it goes on the
   # ticket, and fall back to a plain one if it's off.
   note_ok:
     bool: |-
       Is this a correct note explaining why a ticket moved from {{outputs.from}}
       to {{outputs.to}}, without answering the customer or adding anything untrue?
       Note: {{explain.text}}
-    sees: [fetch.body.title, fetch.body.description, outputs, sla]
+    sees: [fetch.body.title, fetch.body.description, outputs, facts, sla]
     criteria:
       yes: It explains the move to the right severity and stays on that
       no: It names the wrong severity, answers the customer, or says something the ticket doesn't
@@ -129,7 +162,7 @@ nodes:
 
   plain_note:
     action: output
-    set: {note: "Severity moved from {{outputs.from}} to {{outputs.to}}: the ticket fits our SLA definition of {{outputs.to}} better."}
+    set: {note: "Severity moved from {{outputs.from}} to {{outputs.to}} under our SLA. Kind: {{facts.kind.answer}} · core feature down: {{facts.core_down.answer}} · workaround: {{facts.workaround.answer}} · users affected: {{facts.reach.answer}}."}
     then: update
 
   update:

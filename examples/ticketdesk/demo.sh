@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Runs the severity check for real on this machine:
-#   ticketdesk (a toy ticket system) ─webhook─▶ hunch serve ─▶ Jev decides,
-#   a local Ollama model writes the note ─▶ severity lowered + comment.
+#   ticketdesk (a toy ticket system) ─webhook─▶ hunch serve ─▶ Jev decides
+#   the severity and the facts behind it, a local Ollama model writes the
+#   note from those facts, Jev checks it ─▶ severity lowered + comment.
 #
-# Needs: Go, a Jev key in .env (TYPESAFE_API_KEY), and Ollama with the
-# writer model (ollama pull qwen2.5:0.5b; ollama serve).
+# Needs: Go, a Jev key in .env (TYPESAFE_API_KEY), and Ollama with the note
+# model (ollama pull qwen2.5:1.5b; ollama serve).
 #
 #   examples/ticketdesk/demo.sh
 #
@@ -37,7 +38,12 @@ new '{"severity":"sev2.5","title":"CSV export times out for large accounts","des
 new '{"severity":"sev1","title":"Whole platform down","description":"Nothing loads for anyone.","request":"Help."}'
 
 echo "5 tickets created; waiting for hunch..."
-sleep 20
+# Wait until hunch has answered all five webhooks (a model's first call can
+# take a while as it loads), up to two minutes.
+for _ in $(seq 120); do
+  [ "$(grep -c 'webhook →' .demo/desk.log || true)" -ge 5 ] && break
+  sleep 1
+done
 curl -s -H "$auth" "$TICKETS_API/tickets" | python3 -c '
 import json, sys
 for t in json.load(sys.stdin):
