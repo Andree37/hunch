@@ -37,6 +37,8 @@ func cmdServe(ctx context.Context, args []string) error {
 	dedupeKey := fs.String("dedupe-key", "", "template naming a run from its input, e.g. '{{record.id}}'; repeats of a finished run get its reply without running again")
 	dedupeTTL := fs.Duration("dedupe-ttl", 24*time.Hour, "how long a finished run's reply is remembered for duplicates")
 	maxConcurrent := fs.Int("max-concurrent", 4, "runs at once; more wait up to 30s, then get 503")
+	dedupeFile := fs.String("dedupe-file", "", "keep finished runs' replies in this file so duplicates are still caught after a restart")
+	traceMaxMB := fs.Int("trace-max-mb", 100, "roll the trace file over at this size, keeping 3 old ones (0 = never)")
 	path, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -54,6 +56,13 @@ func cmdServe(ctx context.Context, args []string) error {
 	if err := h.load(); err != nil {
 		return err
 	}
+	if *dedupeFile != "" {
+		n, err := h.seen.persist(*dedupeFile)
+		if err != nil {
+			return err
+		}
+		log.Printf("dedupe: %d finished runs remembered from %s", n, *dedupeFile)
+	}
 	var token string
 	if *tokenEnv != "" {
 		if token = os.Getenv(*tokenEnv); token == "" {
@@ -62,7 +71,7 @@ func cmdServe(ctx context.Context, args []string) error {
 	}
 	var rec *trace.Writer
 	if *traceFile != "" {
-		tf, err := os.OpenFile(*traceFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		tf, err := trace.OpenRotating(*traceFile, int64(*traceMaxMB)<<20, 3)
 		if err != nil {
 			return err
 		}
@@ -308,6 +317,53 @@ type dedupe struct {
 	mu      sync.Mutex
 	ttl     time.Duration
 	entries map[string]*dedupeEntry
+	file    *os.File // finished runs are appended here when persisting
+}
+
+// savedReply is one line of the dedupe file.
+type savedReply struct {
+	Key   string    `json:"key"`
+	At    time.Time `json:"at"`
+	Reply runReply  `json:"reply"`
+}
+
+// persist loads finished runs from path (dropping expired ones, which also
+// compacts the file) and appends every run that finishes from now on.
+func (d *dedupe) persist(path string) (int, error) {
+	var kept []savedReply
+	if data, err := os.ReadFile(path); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			var r savedReply
+			if line == "" || json.Unmarshal([]byte(line), &r) != nil || time.Since(r.At) > d.ttl {
+				continue
+			}
+			kept = append(kept, r)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return 0, err
+	}
+	tmp := path + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return 0, err
+	}
+	enc := json.NewEncoder(f)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, r := range kept {
+		d.entries[r.Key] = &dedupeEntry{reply: r.Reply, at: r.At}
+		enc.Encode(r)
+	}
+	if err := f.Close(); err != nil {
+		return 0, err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return 0, err
+	}
+	if d.file, err = os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644); err != nil {
+		return 0, err
+	}
+	return len(kept), nil
 }
 
 type dedupeEntry struct {
@@ -340,7 +396,13 @@ func (d *dedupe) begin(key string) (prev runReply, running, fresh bool) {
 func (d *dedupe) finish(key string, reply runReply) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.entries[key] = &dedupeEntry{reply: reply, at: time.Now()}
+	now := time.Now()
+	d.entries[key] = &dedupeEntry{reply: reply, at: now}
+	if d.file != nil {
+		if err := json.NewEncoder(d.file).Encode(savedReply{Key: key, At: now, Reply: reply}); err != nil {
+			log.Printf("dedupe file: %v", err)
+		}
+	}
 }
 
 func (d *dedupe) forget(key string) {

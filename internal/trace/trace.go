@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -155,4 +156,65 @@ func Read(r io.Reader) ([]*Run, error) {
 		}
 	}
 	return runs, sc.Err()
+}
+
+// RotatingFile is an append-only file that rolls over at a size: path is
+// renamed to path.1 (older ones shift to .2 ... .keep) and a new file starts.
+type RotatingFile struct {
+	mu       sync.Mutex
+	path     string
+	maxBytes int64
+	keep     int
+	f        *os.File
+	size     int64
+}
+
+func OpenRotating(path string, maxBytes int64, keep int) (*RotatingFile, error) {
+	r := &RotatingFile{path: path, maxBytes: maxBytes, keep: max(keep, 1)}
+	return r, r.open()
+}
+
+func (r *RotatingFile) open() error {
+	f, err := os.OpenFile(r.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return err
+	}
+	r.f, r.size = f, st.Size()
+	return nil
+}
+
+func (r *RotatingFile) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.maxBytes > 0 && r.size > 0 && r.size+int64(len(p)) > r.maxBytes {
+		if err := r.rotate(); err != nil {
+			return 0, err
+		}
+	}
+	n, err := r.f.Write(p)
+	r.size += int64(n)
+	return n, err
+}
+
+func (r *RotatingFile) rotate() error {
+	r.f.Close()
+	os.Remove(fmt.Sprintf("%s.%d", r.path, r.keep))
+	for i := r.keep - 1; i >= 1; i-- {
+		os.Rename(fmt.Sprintf("%s.%d", r.path, i), fmt.Sprintf("%s.%d", r.path, i+1))
+	}
+	if err := os.Rename(r.path, r.path+".1"); err != nil {
+		return err
+	}
+	return r.open()
+}
+
+func (r *RotatingFile) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.f.Close()
 }

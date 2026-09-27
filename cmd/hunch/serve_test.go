@@ -226,3 +226,46 @@ func TestServeReloadsFlow(t *testing.T) {
 		t.Errorf("broken edit should keep the last good flow: %d %+v", code, r)
 	}
 }
+
+func TestServeDedupeSurvivesRestart(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "seen.jsonl")
+	body := `{"plan": "pro", "order": {"id": 42, "note": "refund please"}}`
+
+	first := testServer(t, "")
+	first.dedupeKey = "{{order.id}}"
+	if _, err := first.seen.persist(file); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := post(t, first, body, ""); code != 200 {
+		t.Fatalf("first run: %d", code)
+	}
+
+	// A new process: same file, fresh memory.
+	second := testServer(t, "")
+	second.dedupeKey = "{{order.id}}"
+	var buf bytes.Buffer
+	second.trace = trace.NewWriter(&buf)
+	n, err := second.seen.persist(file)
+	if err != nil || n != 1 {
+		t.Fatalf("reloaded %d, %v", n, err)
+	}
+	code, reply := post(t, second, body, "")
+	if code != 200 || !reply.Duplicate || reply.Outputs["action"] != "refund" || runs(&buf) != 0 {
+		t.Errorf("after restart: code=%d reply=%+v runs=%d", code, reply, runs(&buf))
+	}
+}
+
+func TestDedupeFileDropsExpired(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "seen.jsonl")
+	old, _ := json.Marshal(savedReply{Key: "old", At: time.Now().Add(-48 * time.Hour)})
+	fresh, _ := json.Marshal(savedReply{Key: "new", At: time.Now()})
+	os.WriteFile(file, []byte(string(old)+"\n"+string(fresh)+"\n"), 0o644)
+	d := newDedupe(24 * time.Hour)
+	if n, err := d.persist(file); err != nil || n != 1 {
+		t.Fatalf("kept %d, %v", n, err)
+	}
+	data, _ := os.ReadFile(file)
+	if strings.Contains(string(data), `"old"`) {
+		t.Errorf("expired entry should be compacted away: %s", data)
+	}
+}

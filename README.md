@@ -228,13 +228,17 @@ curl -H "Authorization: Bearer $HOOK_TOKEN" \
 - Inputs are checked like everywhere else; bad or missing ones get a 400.
 - Live by default; `--dry-run` records writes instead of sending them.
 - A failed run returns 500 with the error and `failed_at` node.
-- `--trace file.jsonl` keeps every run's events; `GET /healthz` for checks.
+- `--trace file.jsonl` keeps every run's events, rolling over at
+  `--trace-max-mb` (100) and keeping 3 old files, which `hunch tui --runs`
+  reads too; `GET /healthz` for checks.
 - **Duplicates**: webhook senders retry. With `--dedupe-key '{{record.id}}'`,
   or when the sender sends an `Idempotency-Key` header, a repeat of a
   finished run gets that run's reply (marked `"duplicate": true`) without
   running again, and a repeat of one still running gets 409. Failed runs
   aren't remembered, so a retry runs them again. Remembered for
-  `--dedupe-ttl` (24h), in memory: a restart forgets.
+  `--dedupe-ttl` (24h); add `--dedupe-file seen.jsonl` to keep that memory
+  across restarts and deploys. It's per process: with several copies of
+  serve behind a load balancer, each has its own.
 - **Load**: at most `--max-concurrent` (4) runs at once; others wait up to 30s,
   then get 503 with `Retry-After`.
 - **Runs finish** even if the sender hangs up, bounded by `--timeout` (5m), so

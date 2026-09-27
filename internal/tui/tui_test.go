@@ -567,3 +567,21 @@ func TestSaveReplayedRunAsTest(t *testing.T) {
 		t.Errorf("results = %+v", rs)
 	}
 }
+
+func TestRunsIncludeRolledOverFiles(t *testing.T) {
+	older := recordRuns(t, map[string]any{"sender": "old", "message": "hi"})
+	newer := recordRuns(t, map[string]any{"sender": "new", "message": "hi"})
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	data, _ := os.ReadFile(older)
+	os.WriteFile(path+".1", data, 0o644)
+	data, _ = os.ReadFile(newer)
+	os.WriteFile(path, data, 0o644)
+
+	m, _ := New("testdata/inbox.yaml", nil, "mock", false)
+	if err := m.SetRuns(path); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.runs) != 2 || m.runs[0].Input["sender"] != "new" || m.runs[1].Input["sender"] != "old" {
+		t.Errorf("runs = %d, first=%v", len(m.runs), m.runs[0].Input)
+	}
+}
