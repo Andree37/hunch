@@ -17,14 +17,14 @@ func testServer(t *testing.T, token string) *server {
 	t.Helper()
 	f, err := flow.Parse([]byte(`
 inputs:
-  severity: [sev1, sev2, sev3]
+  plan: [free, pro, team]
 nodes:
-  scope: {switch: "{{severity}}", then: {sev2: check, _: skip}}
-  check: {bool: "Is {{ticket.title}} really {{severity}}?", then: {yes: keep, no: lower}}
+  scope: {switch: "{{plan}}", then: {pro: check, _: skip}}
+  check: {bool: "Is {{order.note}} asking for a refund?", then: {yes: refund, no: keep}}
   keep: {action: output, set: {action: keep}}
-  lower: {action: output, set: {action: lower, id: "{{ticket.id}}"}}
+  refund: {action: output, set: {action: refund, id: "{{order.id}}"}}
   skip: {action: output, set: {action: skip}}
-backends: {m: {kind: mock, answers: {check: no}}}
+backends: {m: {kind: mock, answers: {check: yes}}}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -48,16 +48,16 @@ func post(t *testing.T, s *server, body, auth string) (int, runReply) {
 
 func TestServeRunsFlowFromWebhook(t *testing.T) {
 	s := testServer(t, "")
-	code, reply := post(t, s, `{"severity": "sev2", "ticket": {"id": 42, "title": "Login broken"}}`, "")
-	if code != 200 || reply.Outputs["action"] != "lower" || reply.Outputs["id"] != 42.0 {
+	code, reply := post(t, s, `{"plan": "pro", "order": {"id": 42, "note": "please refund me"}}`, "")
+	if code != 200 || reply.Outputs["action"] != "refund" || reply.Outputs["id"] != 42.0 {
 		t.Fatalf("code=%d reply=%+v", code, reply)
 	}
-	if strings.Join(reply.Path, ",") != "scope,check,lower" {
+	if strings.Join(reply.Path, ",") != "scope,check,refund" {
 		t.Errorf("path = %v", reply.Path)
 	}
-	code, reply = post(t, s, `{"severity": "sev1", "ticket": {"id": 1, "title": "x"}}`, "")
+	code, reply = post(t, s, `{"plan": "free", "order": {"id": 1, "note": "x"}}`, "")
 	if code != 200 || reply.Outputs["action"] != "skip" {
-		t.Errorf("sev1: code=%d reply=%+v", code, reply)
+		t.Errorf("free plan: code=%d reply=%+v", code, reply)
 	}
 }
 
@@ -69,8 +69,8 @@ func TestServeRejectsBadRequests(t *testing.T) {
 		msg  string
 	}{
 		"not json":      {`nope`, 400, "JSON object"},
-		"bad choice":    {`{"severity": "sev9", "ticket": {}}`, 400, "sev9 is not one of"},
-		"missing input": {`{"severity": "sev2"}`, 400, "missing input: ticket"},
+		"bad choice":    {`{"plan": "gold", "order": {}}`, 400, "gold is not one of"},
+		"missing input": {`{"plan": "pro"}`, 400, "missing input: order"},
 	}
 	for name, c := range cases {
 		code, reply := post(t, s, c.body, "")
@@ -92,7 +92,7 @@ func TestServeRejectsBadRequests(t *testing.T) {
 
 func TestServeToken(t *testing.T) {
 	s := testServer(t, "s3cret")
-	body := `{"severity": "sev1", "ticket": {}}`
+	body := `{"plan": "free", "order": {}}`
 	if code, _ := post(t, s, body, ""); code != 401 {
 		t.Errorf("no token: %d", code)
 	}
@@ -108,9 +108,9 @@ func TestServeReportsFailedNode(t *testing.T) {
 	s := testServer(t, "")
 	var buf bytes.Buffer
 	s.trace = &buf
-	// check's question needs ticket.title; an empty ticket makes it fail there.
-	code, reply := post(t, s, `{"severity": "sev2", "ticket": {}}`, "")
-	if code != 500 || reply.Node != "check" || !strings.Contains(reply.Error, "ticket.title") {
+	// check's question needs order.note; an empty order makes it fail there.
+	code, reply := post(t, s, `{"plan": "pro", "order": {}}`, "")
+	if code != 500 || reply.Node != "check" || !strings.Contains(reply.Error, "order.note") {
 		t.Errorf("code=%d reply=%+v", code, reply)
 	}
 	if !strings.Contains(buf.String(), `"node":"scope"`) {

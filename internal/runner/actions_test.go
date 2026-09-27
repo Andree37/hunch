@@ -140,13 +140,13 @@ func TestDryRunStillReads(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		methods = append(methods, r.Method)
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"severity": "sev2", "title": "Login broken"}`)
+		io.WriteString(w, `{"status": "open", "name": "Widget"}`)
 	}))
 	defer srv.Close()
 	res, err := runFlow(t, `
 nodes:
-  fetch: {action: http, method: GET, url: "{{base}}/tickets/{{id}}", then: update}
-  update: {action: http, method: PATCH, url: "{{base}}/tickets/{{id}}", body: {severity: sev3, was: "{{fetch.body.severity}}"}}
+  fetch: {action: http, method: GET, url: "{{base}}/items/{{id}}", then: update}
+  update: {action: http, method: PATCH, url: "{{base}}/items/{{id}}", body: {status: closed, was: "{{fetch.body.status}}"}}
 `, map[string]any{"base": srv.URL, "id": 42.0}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ nodes:
 		t.Errorf("server saw %v, want only the GET", methods)
 	}
 	upd := res.State["update"].(map[string]any)
-	if upd["dry_run"] != true || !strings.Contains(upd["body"].(string), `"was":"sev2"`) {
+	if upd["dry_run"] != true || !strings.Contains(upd["body"].(string), `"was":"open"`) {
 		t.Errorf("update = %v", upd)
 	}
 }
@@ -163,23 +163,23 @@ nodes:
 func TestOutputsAndTemplatedCriteria(t *testing.T) {
 	res, err := runFlow(t, `
 state:
-  sla: {high: "Down for everyone", low: "Cosmetic"}
-backends: {m: {kind: mock, answers: {a: low, b: low}}}
+  sizes: {big: "Over a kilogram", small: "Fits in an envelope"}
+backends: {m: {kind: mock, answers: {a: small, b: small}}}
 nodes:
   scope: {switch: "{{sev}}", then: {x: a, _: b}}
   a:
     choice: "Which severity?"
-    options: {high: "{{sla.high}}", low: "{{sla.low}}"}
+    options: {big: "{{sizes.big}}", small: "{{sizes.small}}"}
     then: {_: set_a}
-  b: {choice: "Which?", options: [high, low], then: {_: set_b}}
+  b: {choice: "Which?", options: [big, small], then: {_: set_b}}
   set_a: {action: output, set: {new: "{{a.answer}}"}, then: explain}
   set_b: {action: output, set: {new: "{{b.answer}}"}, then: explain}
-  explain: {action: log, message: "moving to {{outputs.new}}"}
+  explain: {action: log, message: "packing as {{outputs.new}}"}
 `, map[string]any{"sev": "x"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if msg := res.State["explain"].(map[string]any)["message"]; msg != "moving to low" {
+	if msg := res.State["explain"].(map[string]any)["message"]; msg != "packing as small" {
 		t.Errorf("explain = %q", msg)
 	}
 }

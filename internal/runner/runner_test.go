@@ -180,17 +180,17 @@ func TestBeforeCanPauseAndStop(t *testing.T) {
 func TestSwitch(t *testing.T) {
 	src := `
 nodes:
-  scope: {switch: "{{ticket.severity}}", then: {sev2: in, sev2.5: in, _: out}}
+  scope: {switch: "{{order.status}}", then: {paid: in, part.paid: in, _: out}}
   in: {action: output, set: {scope: in}}
   out: {action: output, set: {scope: out}}
 `
-	for sev, want := range map[string]string{"sev2": "in", "sev2.5": "in", "sev1": "out"} {
-		res, err := runFlow(t, src, map[string]any{"ticket": map[string]any{"severity": sev}}, false)
+	for status, want := range map[string]string{"paid": "in", "part.paid": "in", "unpaid": "out"} {
+		res, err := runFlow(t, src, map[string]any{"order": map[string]any{"status": status}}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if res.Outputs["scope"] != want {
-			t.Errorf("%s: scope = %v, want %s", sev, res.Outputs["scope"], want)
+			t.Errorf("%s: scope = %v, want %s", status, res.Outputs["scope"], want)
 		}
 	}
 	_, err := runFlow(t, `nodes: {s: {switch: "{{x}}", then: {a: s}}}`, map[string]any{"x": "b"}, false)

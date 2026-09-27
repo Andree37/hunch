@@ -473,7 +473,7 @@ func parseNode(id string, n *yaml.Node) (*Node, error) {
 	case Switch:
 		node.Switch = fields["switch"].Value
 		if node.Switch == "" {
-			return nil, errAt(n, "node %q: switch needs a value to route on, e.g. \"{{ticket.severity}}\"", id)
+			return nil, errAt(n, "node %q: switch needs a value to route on, e.g. \"{{order.status}}\"", id)
 		}
 	case Action:
 		a, err := parseAction(id, n, fields)

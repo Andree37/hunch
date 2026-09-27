@@ -52,13 +52,13 @@ func TestChatDecide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := b.Decide(context.Background(), map[string]any{"ticket": "site down"}, chatQuestions)
+	resp, err := b.Decide(context.Background(), map[string]any{"report": "page is blank"}, chatQuestions)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	prompt := got[0]["messages"].([]any)[1].(map[string]any)["content"].(string)
-	for _, want := range []string{`"ticket": "site down"`, "id: bug", "- yes: broken", "- 3: now"} {
+	for _, want := range []string{`"report": "page is blank"`, "id: bug", "- yes: broken", "- 3: now"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt missing %q:\n%s", want, prompt)
 		}

@@ -25,7 +25,7 @@ nodes:
   post:
     action: http
     method: put
-    url: "https://example.com/tickets/{{id}}"
+    url: "https://example.com/items/{{id}}"
     headers: {Authorization: "Bearer $TOKEN"}
     body: {text: "{{draft.text}}", tags: [auto]}
     timeout: 5

@@ -23,7 +23,7 @@ import (
 
 // cmdServe runs a flow for every POST it receives: the JSON body is the
 // input, the response is the path taken and the outputs. It is meant to sit
-// behind a webhook, e.g. "ticket created".
+// behind a webhook from another system, e.g. "record created".
 func cmdServe(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("addr", "127.0.0.1:8080", "address to listen on")

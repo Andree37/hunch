@@ -44,15 +44,15 @@ func TestRenderFuncOffsets(t *testing.T) {
 }
 
 func TestLookupDottedKeys(t *testing.T) {
-	state := map[string]any{"sla": map[string]any{
-		"sev2": "two", "sev2.5": "two and a half", "v1.2": map[string]any{"x": "deep"},
+	state := map[string]any{"versions": map[string]any{
+		"v2": "two", "v2.5": "two and a half", "v3.1": map[string]any{"x": "deep"},
 	}}
-	for path, want := range map[string]any{"sla.sev2": "two", "sla.sev2.5": "two and a half", "sla.v1.2.x": "deep"} {
+	for path, want := range map[string]any{"versions.v2": "two", "versions.v2.5": "two and a half", "versions.v3.1.x": "deep"} {
 		if got, ok := Lookup(state, path); !ok || got != want {
 			t.Errorf("Lookup(%q) = %v, %v; want %v", path, got, ok, want)
 		}
 	}
-	if _, ok := Lookup(state, "sla.sev2.6"); ok {
-		t.Error("sla.sev2.6 should not resolve")
+	if _, ok := Lookup(state, "versions.v2.6"); ok {
+		t.Error("versions.v2.6 should not resolve")
 	}
 }
