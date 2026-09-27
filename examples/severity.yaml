@@ -16,8 +16,10 @@
 name: severity-check
 
 backends:
-  default: mock
-  writer: mock
+  default: jev        # decides the severity
+  writer: local       # writes the note on the ticket
+  # A model on this machine via Ollama (ollama pull qwen2.5:0.5b).
+  local: {kind: openai, base_url: "http://localhost:11434/v1", model: "qwen2.5:0.5b"}
   mock: {kind: mock, seed: demo}
   jev: {kind: jev, provider: typesafe}
   claude: {kind: anthropic, model: claude-opus-5}
@@ -90,18 +92,44 @@ nodes:
 
   explain:
     action: llm
-    system: You write short, neutral notes for support tickets. No apologies, no promises.
+    system: >-
+      You write one short internal note for a support ticket explaining a
+      severity change. You do not answer the customer, give instructions or
+      apologise. You only explain why the new severity fits.
     prompt: |-
       Our SLA defines severities as:
       - sev2: {{sla.sev2}}
       - sev2.5: {{sla.sev2.5}}
       - sev3: {{sla.sev3}}
 
-      This ticket was filed as {{outputs.from}} and is being moved to {{outputs.to}}.
-      Title: {{fetch.body.title}}
-      Description: {{fetch.body.description}}
+      Ticket: {{fetch.body.title}}
+      {{fetch.body.description}}
 
-      In two or three sentences, explain why it fits {{outputs.to}} rather than {{outputs.from}}.
+      It is being moved from {{outputs.from}} to {{outputs.to}}. In one or two
+      sentences, say why it fits {{outputs.to}} rather than {{outputs.from}}.
+    then: note_ok
+
+  # The writer is a small local model: check its note before it goes on the
+  # ticket, and fall back to a plain one if it's off.
+  note_ok:
+    bool: |-
+      Is this a correct note explaining why a ticket moved from {{outputs.from}}
+      to {{outputs.to}}, without answering the customer or adding anything untrue?
+      Note: {{explain.text}}
+    sees: [fetch.body.title, fetch.body.description, outputs, sla]
+    criteria:
+      yes: It explains the move to the right severity and stays on that
+      no: It names the wrong severity, answers the customer, or says something the ticket doesn't
+    then: {yes: use_note, no: plain_note, unsure: plain_note}
+
+  use_note:
+    action: output
+    set: {note: "{{explain.text}}"}
+    then: update
+
+  plain_note:
+    action: output
+    set: {note: "Severity moved from {{outputs.from}} to {{outputs.to}}: the ticket fits our SLA definition of {{outputs.to}} better."}
     then: update
 
   update:
@@ -118,7 +146,7 @@ nodes:
     method: POST
     url: "$TICKETS_API/tickets/{{ticket_id}}/comments"
     headers: {Authorization: "Bearer $TICKETS_TOKEN"}
-    body: {body: "{{explain.text}}"}
+    body: {body: "{{outputs.note}}"}
     idempotency_key: "severity-note-{{ticket_id}}"
 
   within_sla:

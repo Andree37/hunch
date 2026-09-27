@@ -304,6 +304,34 @@ hunch tune examples/severity.yaml --runs runs.jsonl --backend jev
 - Each node is judged on the runs that reached it; a changed threshold
   upstream changes which runs reach it.
 
+## Try it for real, locally
+
+`examples/ticketdesk` is a toy ticket system that sends a webhook when a
+ticket is created and accepts severity changes and comments. The demo wires it
+to `hunch serve` running `examples/severity.yaml`: Jev decides the severity, a
+local Ollama model writes the note, and Jev checks the note before it goes on
+the ticket (a plain note is used if it's off).
+
+```sh
+ollama pull qwen2.5:0.5b && ollama serve   # the writer
+examples/ticketdesk/demo.sh                # needs TYPESAFE_API_KEY in .env
+```
+
+It creates five tickets and prints what happened to each:
+
+```
+#1 [sev3] Logo slightly blurry on the settings page
+    created as sev2 · severity sev2 → sev3 · comment added
+#2 [sev2] Checkout fails for all EU customers
+    created as sev2
+#3 [sev3] How do I change my invoice email?
+    created as sev2.5 · severity sev2.5 → sev3 · comment added
+#4 [sev2.5] CSV export times out for large accounts
+#5 [sev1] Whole platform down               (out of scope: only sev2 and sev2.5 are checked)
+```
+
+Replay any of them step by step: `go run ./cmd/hunch tui examples/severity.yaml --runs .demo/runs`.
+
 ## Examples
 
 Each is a different shape of the same building blocks; none is special.
