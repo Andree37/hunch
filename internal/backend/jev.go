@@ -228,7 +228,7 @@ func (j *Jev) post(ctx context.Context, key string, body []byte, out any) error 
 	for attempt := 0; attempt <= j.maxRetries; attempt++ {
 		if attempt > 0 {
 			delay := j.retryDelay(attempt, lastErr)
-			reportStatus(ctx, "%s, retrying in %s (attempt %d/%d)", shortErr(lastErr), delay, attempt+1, j.maxRetries+1)
+			ReportStatus(ctx, "%s, retrying in %s (attempt %d/%d)", shortErr(lastErr), delay, attempt+1, j.maxRetries+1)
 			if err := sleep(ctx, delay); err != nil {
 				return err
 			}

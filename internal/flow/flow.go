@@ -88,6 +88,9 @@ type ActionSpec struct {
 	Set []KV // output
 
 	Timeout float64 // seconds, shell and http
+
+	Retries        *int   // http: extra attempts on temporary failures, default 2
+	IdempotencyKey string // http: sent as Idempotency-Key; makes POST/PATCH safe to retry
 }
 
 // KV is one entry of an ordered map from the flow file. Value is a
@@ -103,11 +106,11 @@ var actionFields = map[string]map[string]bool{
 	ActLog:    set("message"),
 	ActShell:  set("run", "timeout"),
 	ActLLM:    set("prompt", "system", "max_tokens", "backend"),
-	ActHTTP:   set("method", "url", "headers", "body", "timeout"),
+	ActHTTP:   set("method", "url", "headers", "body", "timeout", "retries", "idempotency_key"),
 	ActOutput: set("set"),
 }
 
-var actionOnly = []string{"message", "run", "prompt", "system", "max_tokens", "method", "url", "headers", "body", "set", "timeout"}
+var actionOnly = []string{"message", "run", "prompt", "system", "max_tokens", "method", "url", "headers", "body", "set", "timeout", "retries", "idempotency_key"}
 
 type Branch struct{ When, To string }
 
@@ -169,7 +172,7 @@ func (n *Node) Texts() []string {
 		out = append(out, n.Switch)
 	}
 	if a := n.Action; a != nil {
-		out = append(out, a.Message, a.Run, a.Prompt, a.System, a.URL)
+		out = append(out, a.Message, a.Run, a.Prompt, a.System, a.URL, a.IdempotencyKey)
 		for _, h := range a.Headers {
 			out = append(out, h.Value)
 		}

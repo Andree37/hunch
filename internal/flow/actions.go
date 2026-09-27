@@ -26,6 +26,14 @@ func parseAction(id string, n *yaml.Node, fields map[string]*yaml.Node) (*Action
 	}
 	a.Message, a.Run, a.Prompt, a.System = str("message"), str("run"), str("prompt"), str("system")
 	a.Method, a.URL = strings.ToUpper(str("method")), str("url")
+	a.IdempotencyKey = str("idempotency_key")
+	if v := fields["retries"]; v != nil {
+		var n int
+		if err := v.Decode(&n); err != nil || n < 0 {
+			return nil, errAt(v, "node %q: retries must be a whole number >= 0", id)
+		}
+		a.Retries = &n
+	}
 	for _, k := range []struct {
 		key string
 		dst any

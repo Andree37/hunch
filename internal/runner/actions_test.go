@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Andree37/hunch/internal/backend"
 	"github.com/Andree37/hunch/internal/flow"
@@ -181,5 +182,68 @@ nodes:
 	}
 	if msg := res.State["explain"].(map[string]any)["message"]; msg != "packing as small" {
 		t.Errorf("explain = %q", msg)
+	}
+}
+
+func TestHTTPRetries(t *testing.T) {
+	retryWait = time.Millisecond
+	cases := []struct {
+		name     string
+		method   string
+		extra    string
+		statuses []int // server replies, in order; then 200
+		wantHits int
+		wantErr  bool
+	}{
+		{"GET retries a 500", "GET", "", []int{500, 502}, 3, false},
+		{"POST retries a 503", "POST", "", []int{503}, 2, false},
+		{"POST retries a 429", "POST", "", []int{429, 429}, 3, false},
+		{"POST won't repeat a 500", "POST", "", []int{500}, 1, true},
+		{"POST with an idempotency key retries a 500", "POST", `, idempotency_key: "order-{{id}}"`, []int{500}, 2, false},
+		{"retries: 0 turns it off", "GET", ", retries: 0", []int{500}, 1, true},
+		{"gives up after the retries", "GET", ", retries: 1", []int{500, 500, 500}, 2, true},
+		{"4xx is not retried", "GET", "", []int{404}, 1, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			hits := 0
+			var keys []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				keys = append(keys, r.Header.Get("Idempotency-Key"))
+				if hits < len(c.statuses) {
+					w.WriteHeader(c.statuses[hits])
+				}
+				hits++
+			}))
+			defer srv.Close()
+			src := `nodes: {call: {action: http, method: ` + c.method + `, url: "{{base}}"` + c.extra + `}}`
+			_, err := runFlow(t, src, map[string]any{"base": srv.URL, "id": 7.0}, false)
+			if hits != c.wantHits || (err != nil) != c.wantErr {
+				t.Errorf("hits=%d err=%v; want hits=%d err=%v", hits, err, c.wantHits, c.wantErr)
+			}
+			if strings.Contains(c.extra, "idempotency") && keys[0] != "order-7" {
+				t.Errorf("Idempotency-Key = %q", keys[0])
+			}
+		})
+	}
+}
+
+func TestHTTPRetryReportsStatus(t *testing.T) {
+	retryWait = time.Millisecond
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits++; hits == 1 {
+			w.WriteHeader(503)
+		}
+	}))
+	defer srv.Close()
+	f, _ := flow.Parse([]byte(`nodes: {call: {action: http, url: "{{base}}"}}`))
+	var notes []string
+	ctx := backend.WithStatus(context.Background(), func(s string) { notes = append(notes, s) })
+	if _, err := Run(ctx, f, map[string]any{"base": srv.URL}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "POST call: HTTP 503, retrying") {
+		t.Errorf("notes = %q", notes)
 	}
 }

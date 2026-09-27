@@ -87,7 +87,7 @@ under its node name, so later nodes can use it.
 | `log` (shown as SAY) | `message` | `message` |
 | `shell` | `run`, `timeout` (s, default 60) | `stdout`, `exit_code` |
 | `llm` | `prompt`, `system`, `max_tokens`, `backend` | `text` |
-| `http` | `url`, `method` (default POST), `headers`, `body`, `timeout` (s, default 30) | `status`, `body` (parsed if JSON) |
+| `http` | `url`, `method` (default POST), `headers`, `body`, `timeout` (s, default 30), `retries` (default 2), `idempotency_key` | `status`, `body` (parsed if JSON) |
 | `output` | `set: {name: value}` | the values; also the flow's **outputs** |
 
 ```yaml
@@ -125,6 +125,10 @@ nodes:
 - **Secrets** go in `$VARS` in `url` and `headers`, read from the environment,
   so they never enter state or any model's prompt. Refs in a URL are escaped.
 - A `body` map is sent as JSON; a ref that is the whole value keeps its type.
+- **Retries** never risk doing something twice: GET/PUT/DELETE retry network
+  errors, 429 and 5xx; POST/PATCH only retry 429 and 503 (not processed)
+  unless you give an `idempotency_key` (sent as `Idempotency-Key`, e.g.
+  `"comment-{{record.id}}"`), which lets the receiving API drop duplicates.
 - `output` values are what your code reads: `hunch run --json` prints the
   final state, and each run prints its outputs. Test cases can expect them:
   `sent.action: sent`.

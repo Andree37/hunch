@@ -70,7 +70,8 @@ func WithStatus(ctx context.Context, fn func(string)) context.Context {
 	return context.WithValue(ctx, statusKey{}, fn)
 }
 
-func reportStatus(ctx context.Context, format string, args ...any) {
+// ReportStatus sends a progress note to the callback in ctx, if any.
+func ReportStatus(ctx context.Context, format string, args ...any) {
 	if fn, ok := ctx.Value(statusKey{}).(func(string)); ok {
 		fn(fmt.Sprintf(format, args...))
 	}

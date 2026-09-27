@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -85,41 +86,102 @@ func httpNode(ctx context.Context, n *flow.Node, state map[string]any, opts Opti
 	if a.Timeout > 0 {
 		timeout = time.Duration(a.Timeout * float64(time.Second))
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, a.Method, rawURL, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
+	headers := http.Header{}
 	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
+		headers.Set("Content-Type", contentType)
 	}
 	for _, h := range a.Headers {
 		v, err := tmpl.Render(h.Value, state)
 		if err != nil {
 			return err
 		}
-		req.Header.Set(h.Key, os.ExpandEnv(v))
+		headers.Set(h.Key, os.ExpandEnv(v))
 	}
-	resp, err := http.DefaultClient.Do(req)
+	if a.IdempotencyKey != "" {
+		key, err := tmpl.Render(a.IdempotencyKey, state)
+		if err != nil {
+			return err
+		}
+		headers.Set("Idempotency-Key", key)
+	}
+	retries := 2
+	if a.Retries != nil {
+		retries = *a.Retries
+	}
+	// Repeating a request is only safe when it can't be applied twice.
+	safe := a.Method == http.MethodGet || a.Method == http.MethodPut || a.Method == http.MethodDelete || a.IdempotencyKey != ""
+
+	var status int
+	var data []byte
+	for attempt := 0; ; attempt++ {
+		status, data, err = send(ctx, a.Method, rawURL, headers, body, timeout)
+		if attempt >= retries || !retryable(err, status, safe) {
+			break
+		}
+		wait := retryWait << attempt
+		backend.ReportStatus(ctx, "%s %s: %s, retrying in %s (attempt %d/%d)",
+			a.Method, n.ID, failure(err, status), wait, attempt+2, retries+1)
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return err
-	}
-	out := map[string]any{"status": resp.StatusCode, "body": string(data)}
+	out := map[string]any{"status": status, "body": string(data)}
 	var parsed any
 	if json.Unmarshal(data, &parsed) == nil {
 		out["body"] = parsed
 	}
 	ev.Output = out
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("%s %s: HTTP %d: %.200s", a.Method, rawURL, resp.StatusCode, data)
+	if status >= 300 {
+		return fmt.Errorf("%s %s: HTTP %d: %.200s", a.Method, rawURL, status, data)
 	}
 	return nil
+}
+
+// retryWait is the first retry's delay; each later one doubles it.
+var retryWait = 500 * time.Millisecond
+
+func send(ctx context.Context, method, url string, headers http.Header, body []byte, timeout time.Duration) (int, []byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header = headers.Clone()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return resp.StatusCode, data, err
+}
+
+// retryable: 429 and 503 mean the request wasn't processed, so any method
+// may repeat it. Other 5xx and network errors may have been applied, so only
+// requests that are safe to repeat retry on those.
+func retryable(err error, status int, safe bool) bool {
+	switch {
+	case err != nil:
+		return safe && !errors.Is(err, context.Canceled)
+	case status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable:
+		return true
+	case status >= 500:
+		return safe
+	}
+	return false
+}
+
+func failure(err error, status int) string {
+	if err != nil {
+		return "network error"
+	}
+	return fmt.Sprintf("HTTP %d", status)
 }
 
 // renderBody renders a template string as text, or a map/list (whose
