@@ -30,6 +30,7 @@ func cmdServe(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("addr", "127.0.0.1:8080", "address to listen on")
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
+	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
 	dryRun := fs.Bool("dry-run", false, "don't send http requests that write; record them instead")
 	tokenEnv := fs.String("token-env", "", "require `Authorization: Bearer <token>` with the token read from this env var")
 	traceFile := fs.String("trace", "", "append every run's events to this JSONL file")
@@ -47,6 +48,7 @@ func cmdServe(ctx context.Context, args []string) error {
 	h := &server{
 		path:      path,
 		backend:   *backendName,
+		writer:    *writerName,
 		dryRun:    *dryRun,
 		timeout:   *timeout,
 		dedupeKey: *dedupeKey,
@@ -101,6 +103,7 @@ func cmdServe(ctx context.Context, args []string) error {
 type server struct {
 	path      string
 	backend   string // overrides the flow's default, if set
+	writer    string // overrides the flow's writer, if set
 	dryRun    bool
 	token     string
 	timeout   time.Duration
@@ -137,11 +140,8 @@ func (s *server) load() error {
 	if err != nil {
 		return err
 	}
-	if s.backend != "" {
-		if _, ok := f.Backends[s.backend]; !ok {
-			return fmt.Errorf("backend %q is not defined in %s", s.backend, s.path)
-		}
-		f.DefaultBackend = s.backend
+	if err := pickBackends(f, s.path, s.backend, s.writer); err != nil {
+		return err
 	}
 	backends := map[string]backend.Backend{}
 	for name, cfg := range f.Backends {

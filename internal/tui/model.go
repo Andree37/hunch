@@ -81,6 +81,7 @@ type Model struct {
 	modTime time.Time
 
 	backend string
+	writer  string // overrides the flow's writer for llm nodes, if set
 	inputs  []input
 
 	cases      []*cases.Case
@@ -473,6 +474,19 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// SetWriter makes llm nodes write with the named backend instead of the
+// flow's writer.
+func (m *Model) SetWriter(name string) error {
+	if name == "" {
+		return nil
+	}
+	if _, ok := m.flow.Backends[name]; !ok {
+		return fmt.Errorf("backend %q is not defined in %s", name, m.path)
+	}
+	m.writer = name
+	return nil
+}
+
 // spec returns the declared spec for an input, or a free-form one.
 func (m *Model) spec(key string) flow.InputSpec {
 	if m.flow == nil {
@@ -678,6 +692,9 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 
 	f := *m.flow
 	f.DefaultBackend = m.backend
+	if m.writer != "" {
+		f.WriterBackend = m.writer
+	}
 	// A loaded test case's canned http responses apply to its runs.
 	var fakes map[string]runner.FakeResponse
 	if m.active >= 0 {

@@ -6,7 +6,9 @@
 #   hunch test examples/respond.yaml --backend jev    # Jev decides, mock writes
 #   hunch run examples/respond.yaml --case password-reset --dry-run --json
 #
-# Swap models by changing `default` (who decides) and `writer` (who writes).
+# Swap models by changing `default` (who decides) and `writer` (who writes),
+# or per run with --backend and --writer:
+#   hunch run examples/respond.yaml --case outage --backend jev --writer ollama --dry-run
 name: first-response
 
 backends:
@@ -16,7 +18,7 @@ backends:
   jev: {kind: jev, provider: typesafe}
   claude: {kind: anthropic, model: claude-opus-5}
   bedrock: {kind: bedrock, model: anthropic.claude-opus-5, region: us-east-1}
-  ollama: {kind: openai, base_url: "http://localhost:11434/v1", model: llama3.2}
+  ollama: {kind: openai, base_url: "http://localhost:11434/v1", model: qwen2.5:0.5b}
 
 inputs:
   channel:

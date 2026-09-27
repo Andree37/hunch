@@ -33,6 +33,7 @@ func cmdTune(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("tune", flag.ExitOnError)
 	runsFile := fs.String("runs", "", "recorded runs to learn from (from run/serve --trace)")
 	backendName := fs.String("backend", "", "backend for running the test cases")
+	writerName := fs.String("writer", "", "backend for llm nodes when running the test cases")
 	noTests := fs.Bool("no-tests", false, "don't run the test cases; use recorded runs only")
 	all := fs.Bool("all", false, "show every decision node, not only those that route on confidence")
 	path, err := parseArgs(fs, args)
@@ -43,11 +44,8 @@ func cmdTune(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if *backendName != "" {
-		if _, ok := f.Backends[*backendName]; !ok {
-			return fmt.Errorf("backend %q is not defined in %s", *backendName, path)
-		}
-		f.DefaultBackend = *backendName
+	if err := pickBackends(f, path, *backendName, *writerName); err != nil {
+		return err
 	}
 
 	samples := map[string][]sample{}

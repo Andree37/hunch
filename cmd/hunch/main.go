@@ -27,11 +27,11 @@ const usage = `hunch: decision flows with typed, calibrated answers
 
 usage:
   hunch validate FLOW
-  hunch tui FLOW [--backend name] [--set key=value]... [--state file.json] [--runs file.jsonl]
-  hunch run FLOW [--backend name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl] [--json] [--dry-run]
-  hunch test FLOW [--backend name] [--live] [name...]
-  hunch tune FLOW [--runs file.jsonl] [--backend name] [--no-tests] [--all]
-  hunch serve FLOW [--addr 127.0.0.1:8080] [--backend name] [--dry-run] [--token-env VAR] [--trace file.jsonl]
+  hunch tui FLOW [--backend name] [--writer name] [--set key=value]... [--state file.json] [--runs file.jsonl]
+  hunch run FLOW [--backend name] [--writer name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl] [--json] [--dry-run]
+  hunch test FLOW [--backend name] [--writer name] [--live] [name...]
+  hunch tune FLOW [--runs file.jsonl] [--backend name] [--writer name] [--no-tests] [--all]
+  hunch serve FLOW [--addr 127.0.0.1:8080] [--backend name] [--writer name] [--dry-run] [--token-env VAR] [--trace file.jsonl]
              [--dedupe-key '{{record.id}}'] [--dedupe-file seen.jsonl] [--max-concurrent 4]
              [--timeout 5m] [--trace-max-mb 100]
 
@@ -104,6 +104,7 @@ func cmdRun(ctx context.Context, args []string) error {
 	asJSON := fs.Bool("json", false, "print final state as JSON on stdout; progress goes to stderr")
 	maxVisits := fs.Int("max-visits", 5, "max times a single node may run")
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
+	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
 	caseName := fs.String("case", "", "take input from this test case (--set still overrides)")
 	dryRun := fs.Bool("dry-run", false, "don't send http requests; record them instead")
 	path, err := parseArgs(fs, args)
@@ -120,11 +121,8 @@ func cmdRun(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if *backendName != "" {
-		if _, ok := f.Backends[*backendName]; !ok {
-			return fmt.Errorf("backend %q is not defined in %s", *backendName, path)
-		}
-		f.DefaultBackend = *backendName
+	if err := pickBackends(f, path, *backendName, *writerName); err != nil {
+		return err
 	}
 
 	var c *cases.Case
@@ -201,6 +199,7 @@ func cmdTUI(args []string) error {
 	fs.Var(&sets, "set", "set a state field, key=value (repeatable)")
 	stateFile := fs.String("state", "", "JSON file with initial state")
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
+	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
 	runsFile := fs.String("runs", "", "recorded runs to list and replay (from run/serve --trace)")
 	path, err := parseArgs(fs, args)
 	if err != nil {
@@ -229,12 +228,16 @@ func cmdTUI(args []string) error {
 			return err
 		}
 	}
+	if err := m.SetWriter(*writerName); err != nil {
+		return err
+	}
 	return tui.Run(m)
 }
 
 func cmdTest(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("test", flag.ExitOnError)
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
+	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
 	live := fs.Bool("live", false, "send http requests for real (default: record them only)")
 	var paths []string
 	for {
@@ -256,11 +259,8 @@ func cmdTest(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if *backendName != "" {
-		if _, ok := f.Backends[*backendName]; !ok {
-			return fmt.Errorf("backend %q is not defined in %s", *backendName, path)
-		}
-		f.DefaultBackend = *backendName
+	if err := pickBackends(f, path, *backendName, *writerName); err != nil {
+		return err
 	}
 	all, err := cases.Load(cases.Dir(path))
 	if err != nil {
@@ -344,6 +344,23 @@ func missingInputs(f *flow.Flow, state map[string]any) []string {
 		}
 	}
 	return out
+}
+
+// pickBackends applies --backend (who decides) and --writer (who writes for
+// llm nodes) to the flow.
+func pickBackends(f *flow.Flow, path, decider, writer string) error {
+	for _, name := range []string{decider, writer} {
+		if _, ok := f.Backends[name]; name != "" && !ok {
+			return fmt.Errorf("backend %q is not defined in %s", name, path)
+		}
+	}
+	if decider != "" {
+		f.DefaultBackend = decider
+	}
+	if writer != "" {
+		f.WriterBackend = writer
+	}
+	return nil
 }
 
 // checkInputs fails on required inputs that are missing and on values that
