@@ -269,6 +269,25 @@ hunch tui examples/respond.yaml --runs runs.jsonl        # look at what happened
   same after any finished run in the TUI; with no run of the current inputs on
   screen it saves just the inputs.
 
+## Tuning thresholds
+
+`hunch tune FLOW` shows, for each node that routes on confidence, what every
+threshold would do with the answers already collected: how many go through
+automatically, how many go to `unsure`, and how many would be confident but
+wrong.
+
+```sh
+hunch tune examples/severity.yaml --runs runs.jsonl --backend jev
+```
+
+- Recorded runs (`--runs`) are real traffic but don't say what's right; test
+  cases are run once and do. `--no-tests` uses recordings only.
+- It suggests the lowest threshold with no confident wrong answer among the
+  known ones, and warns when there are fewer than 10 of those to go on.
+- Each node is judged on the runs that reached it; a changed threshold
+  upstream changes which runs reach it.
+
+## Examples
 
 Each is a different shape of the same building blocks; none is special.
 
@@ -381,5 +400,6 @@ Keys: `j/k` move · `tab` next pane · `enter` edit / load case · `r` run (noth
   answers, unreachable nodes, loops, refs to nodes that haven't run yet.
 - `hunch tui FLOW [--backend name] [--set k=v]... [--state f.json] [--runs file.jsonl]`
 - `hunch test FLOW [--backend name] [--live] [case...]`: run test cases, check expectations. `http` nodes don't send unless `--live`.
+- `hunch tune FLOW [--runs file.jsonl] [--backend name] [--no-tests] [--all]`: see what each threshold would do.
 - `hunch serve FLOW [--addr host:port] [--backend name] [--dry-run] [--token-env VAR] [--trace file]`: run the flow for each webhook POST.
 - `hunch run FLOW [--backend name] [--case name] [--set k=v]... [--state f.json] [--trace f.jsonl] [--json] [--max-visits N]`
