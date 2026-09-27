@@ -30,6 +30,7 @@ usage:
   hunch run FLOW [--backend name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl] [--json] [--dry-run]
   hunch test FLOW [--backend name] [--live] [name...]
   hunch serve FLOW [--addr 127.0.0.1:8080] [--backend name] [--dry-run] [--token-env VAR] [--trace file.jsonl]
+             [--dedupe-key '{{record.id}}'] [--max-concurrent 4] [--timeout 5m]
 
 http nodes that write send for real in run and serve (unless --dry-run) and
 only record the request in test and the TUI (unless --live / L).

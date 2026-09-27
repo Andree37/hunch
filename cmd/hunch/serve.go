@@ -19,6 +19,7 @@ import (
 	"github.com/Andree37/hunch/internal/backend"
 	"github.com/Andree37/hunch/internal/flow"
 	"github.com/Andree37/hunch/internal/runner"
+	"github.com/Andree37/hunch/internal/tmpl"
 )
 
 // cmdServe runs a flow for every POST it receives: the JSON body is the
@@ -32,28 +33,25 @@ func cmdServe(ctx context.Context, args []string) error {
 	tokenEnv := fs.String("token-env", "", "require `Authorization: Bearer <token>` with the token read from this env var")
 	traceFile := fs.String("trace", "", "append every run's events to this JSONL file")
 	timeout := fs.Duration("timeout", 5*time.Minute, "longest a single run may take")
+	dedupeKey := fs.String("dedupe-key", "", "template naming a run from its input, e.g. '{{record.id}}'; repeats of a finished run get its reply without running again")
+	dedupeTTL := fs.Duration("dedupe-ttl", 24*time.Hour, "how long a finished run's reply is remembered for duplicates")
+	maxConcurrent := fs.Int("max-concurrent", 4, "runs at once; more wait up to 30s, then get 503")
 	path, err := parseArgs(fs, args)
 	if err != nil {
 		return err
 	}
 
-	f, err := loadChecked(path, os.Stderr)
-	if err != nil {
+	h := &server{
+		path:      path,
+		backend:   *backendName,
+		dryRun:    *dryRun,
+		timeout:   *timeout,
+		dedupeKey: *dedupeKey,
+		seen:      newDedupe(*dedupeTTL),
+		slots:     make(chan struct{}, max(*maxConcurrent, 1)),
+	}
+	if err := h.load(); err != nil {
 		return err
-	}
-	if *backendName != "" {
-		if _, ok := f.Backends[*backendName]; !ok {
-			return fmt.Errorf("backend %q is not defined in %s", *backendName, path)
-		}
-		f.DefaultBackend = *backendName
-	}
-	backends := map[string]backend.Backend{}
-	for name, cfg := range f.Backends {
-		b, err := backend.New(cfg)
-		if err != nil {
-			return err
-		}
-		backends[name] = b
 	}
 	var token string
 	if *tokenEnv != "" {
@@ -71,7 +69,7 @@ func cmdServe(ctx context.Context, args []string) error {
 		trace = tf
 	}
 
-	h := &server{flow: f, backends: backends, dryRun: *dryRun, token: token, timeout: *timeout, trace: trace}
+	h.token, h.trace = token, trace
 	srv := &http.Server{Addr: *addr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -83,7 +81,7 @@ func cmdServe(ctx context.Context, args []string) error {
 	if *dryRun {
 		mode = "dry run"
 	}
-	log.Printf("serving %s on http://%s (backend %s, %s)", path, *addr, f.DefaultBackend, mode)
+	log.Printf("serving %s on http://%s (backend %s, %s, up to %d at once)", path, *addr, h.flow.DefaultBackend, mode, cap(h.slots))
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -91,22 +89,91 @@ func cmdServe(ctx context.Context, args []string) error {
 }
 
 type server struct {
+	path      string
+	backend   string // overrides the flow's default, if set
+	dryRun    bool
+	token     string
+	timeout   time.Duration
+	dedupeKey string
+	seen      *dedupe
+	slots     chan struct{} // one per run allowed at once
+	busyWait  time.Duration // how long a request waits for a slot; 0 means 30s
+
+	mu       sync.RWMutex // guards the fields below, swapped on reload
 	flow     *flow.Flow
 	backends map[string]backend.Backend
-	dryRun   bool
-	token    string
-	timeout  time.Duration
+	modTime  time.Time
+	checked  time.Time
 
 	traceMu sync.Mutex
 	trace   io.Writer
 }
 
 type runReply struct {
-	Path    []string       `json:"path"`
-	Outputs map[string]any `json:"outputs"`
-	CostUSD float64        `json:"cost_usd"`
-	Error   string         `json:"error,omitempty"`
-	Node    string         `json:"failed_at,omitempty"`
+	Path      []string       `json:"path"`
+	Outputs   map[string]any `json:"outputs"`
+	CostUSD   float64        `json:"cost_usd"`
+	Error     string         `json:"error,omitempty"`
+	Node      string         `json:"failed_at,omitempty"`
+	Duplicate bool           `json:"duplicate,omitempty"`
+}
+
+// load (re)reads the flow and builds its backends.
+func (s *server) load() error {
+	st, err := os.Stat(s.path)
+	if err != nil {
+		return err
+	}
+	f, err := loadChecked(s.path, os.Stderr)
+	if err != nil {
+		return err
+	}
+	if s.backend != "" {
+		if _, ok := f.Backends[s.backend]; !ok {
+			return fmt.Errorf("backend %q is not defined in %s", s.backend, s.path)
+		}
+		f.DefaultBackend = s.backend
+	}
+	backends := map[string]backend.Backend{}
+	for name, cfg := range f.Backends {
+		b, err := backend.New(cfg)
+		if err != nil {
+			return err
+		}
+		backends[name] = b
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flow, s.backends, s.modTime = f, backends, st.ModTime()
+	return nil
+}
+
+// current returns the flow to run, reloading it (at most once a second) if
+// the file changed. A broken edit keeps the last good flow running.
+func (s *server) current() (*flow.Flow, map[string]backend.Backend) {
+	s.mu.RLock()
+	f, b, mod, checked := s.flow, s.backends, s.modTime, s.checked
+	s.mu.RUnlock()
+	if s.path == "" || time.Since(checked) < time.Second {
+		return f, b
+	}
+	s.mu.Lock()
+	s.checked = time.Now()
+	s.mu.Unlock()
+	if st, err := os.Stat(s.path); err == nil && !st.ModTime().Equal(mod) {
+		if err := s.load(); err != nil {
+			log.Printf("reload failed, still serving the previous flow: %v", err)
+			s.mu.Lock()
+			s.modTime = st.ModTime() // don't retry until it changes again
+			s.mu.Unlock()
+		} else {
+			log.Printf("reloaded %s", s.path)
+		}
+		s.mu.RLock()
+		f, b = s.flow, s.backends
+		s.mu.RUnlock()
+	}
+	return f, b
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -137,18 +204,63 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, runReply{Error: "body must be a JSON object: " + err.Error()})
 		return
 	}
-	state := maps.Clone(s.flow.State)
+	f, backends := s.current()
+	state := maps.Clone(f.State)
 	maps.Copy(state, input)
-	if err := checkInputs(s.flow, state); err != nil {
+	if err := checkInputs(f, state); err != nil {
 		writeJSON(w, http.StatusBadRequest, runReply{Error: err.Error()})
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), s.timeout)
+	// Duplicates: the sender's Idempotency-Key, else --dedupe-key.
+	key := r.Header.Get("Idempotency-Key")
+	if key == "" && s.dedupeKey != "" {
+		k, err := tmpl.Render(s.dedupeKey, state)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, runReply{Error: "--dedupe-key: " + err.Error()})
+			return
+		}
+		key = k
+	}
+	if key != "" {
+		prev, running, fresh := s.seen.begin(key)
+		switch {
+		case running:
+			writeJSON(w, http.StatusConflict, runReply{Error: "a run for " + key + " is already in progress", Duplicate: true})
+			return
+		case !fresh:
+			log.Printf("duplicate %s: returning the earlier reply", key)
+			prev.Duplicate = true
+			writeJSON(w, http.StatusOK, prev)
+			return
+		}
+	}
+
+	// Wait for a free slot; after a while ask the sender to come back later.
+	wait := s.busyWait
+	if wait == 0 {
+		wait = 30 * time.Second
+	}
+	select {
+	case s.slots <- struct{}{}:
+		defer func() { <-s.slots }()
+	case <-time.After(wait):
+		s.seen.forget(key)
+		w.Header().Set("Retry-After", "30")
+		writeJSON(w, http.StatusServiceUnavailable, runReply{Error: "busy, try again later"})
+		return
+	case <-r.Context().Done():
+		s.seen.forget(key)
+		return
+	}
+
+	// The run must finish even if the sender hangs up: stopping halfway
+	// could leave one write done and the next not.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), s.timeout)
 	defer cancel()
 	start := time.Now()
-	res, err := runner.Run(ctx, s.flow, state, runner.Options{
-		Backends: s.backends,
+	res, err := runner.Run(ctx, f, state, runner.Options{
+		Backends: backends,
 		DryRun:   s.dryRun,
 		OnEvent:  s.writeTrace,
 	})
@@ -159,6 +271,14 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply.Error = err.Error()
 		if len(res.Path) > 0 {
 			reply.Node = res.Path[len(res.Path)-1]
+		}
+	}
+	if key != "" {
+		// Only finished runs are remembered; a failed one may be retried.
+		if err == nil {
+			s.seen.finish(key, reply)
+		} else {
+			s.seen.forget(key)
 		}
 	}
 	log.Printf("%d %s · %s · $%.6f · %s", status, strings.Join(res.Path, " → "),
@@ -187,4 +307,53 @@ func formatOutputs(outputs map[string]any) string {
 	}
 	data, _ := json.Marshal(outputs)
 	return string(data)
+}
+
+// dedupe remembers runs by key: in progress, or finished with their reply.
+type dedupe struct {
+	mu      sync.Mutex
+	ttl     time.Duration
+	entries map[string]*dedupeEntry
+}
+
+type dedupeEntry struct {
+	running bool
+	reply   runReply
+	at      time.Time
+}
+
+func newDedupe(ttl time.Duration) *dedupe {
+	return &dedupe{ttl: ttl, entries: map[string]*dedupeEntry{}}
+}
+
+// begin claims key. fresh means the caller should run; otherwise the key is
+// either running or finished with prev as its reply.
+func (d *dedupe) begin(key string) (prev runReply, running, fresh bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for k, e := range d.entries {
+		if !e.running && time.Since(e.at) > d.ttl {
+			delete(d.entries, k)
+		}
+	}
+	if e, ok := d.entries[key]; ok {
+		return e.reply, e.running, false
+	}
+	d.entries[key] = &dedupeEntry{running: true, at: time.Now()}
+	return runReply{}, false, true
+}
+
+func (d *dedupe) finish(key string, reply runReply) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.entries[key] = &dedupeEntry{reply: reply, at: time.Now()}
+}
+
+func (d *dedupe) forget(key string) {
+	if key == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.entries, key)
 }

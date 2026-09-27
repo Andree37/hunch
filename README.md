@@ -214,6 +214,18 @@ curl -H "Authorization: Bearer $HOOK_TOKEN" \
 - Live by default; `--dry-run` records writes instead of sending them.
 - A failed run returns 500 with the error and `failed_at` node.
 - `--trace file.jsonl` keeps every run's events; `GET /healthz` for checks.
+- **Duplicates**: webhook senders retry. With `--dedupe-key '{{record.id}}'`,
+  or when the sender sends an `Idempotency-Key` header, a repeat of a
+  finished run gets that run's reply (marked `"duplicate": true`) without
+  running again, and a repeat of one still running gets 409. Failed runs
+  aren't remembered, so a retry runs them again. Remembered for
+  `--dedupe-ttl` (24h), in memory: a restart forgets.
+- **Load**: at most `--max-concurrent` (4) runs at once; others wait up to 30s,
+  then get 503 with `Retry-After`.
+- **Runs finish** even if the sender hangs up, bounded by `--timeout` (5m), so
+  a run never stops between two writes.
+- **Edits** to the flow file are picked up on the next request; a broken edit
+  is logged and the last good flow keeps serving.
 
 ## Examples
 
