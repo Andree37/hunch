@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/Andree37/hunch/internal/backend"
+	"github.com/Andree37/hunch/internal/flow"
+	"github.com/Andree37/hunch/internal/runner"
+	"github.com/Andree37/hunch/internal/trace"
 )
 
 // drive feeds cmd results back into the model until the run finishes.
@@ -415,5 +421,108 @@ func TestSwitchNode(t *testing.T) {
 		if !strings.Contains(screen, want) {
 			t.Errorf("screen missing %q:\n%s", want, screen)
 		}
+	}
+}
+
+// recordRuns runs the test flow for each input and records it like serve does.
+func recordRuns(t *testing.T, inputs ...map[string]any) string {
+	t.Helper()
+	f, err := flow.Load("testdata/inbox.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := backend.New(f.Backends["mock"])
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	file, _ := os.Create(path)
+	defer file.Close()
+	rec := trace.NewWriter(file)
+	for _, in := range inputs {
+		id := trace.NewID()
+		rec.Start(id, "testdata/inbox.yaml", "mock", in)
+		res, err := runner.Run(context.Background(), f, in, runner.Options{
+			Backends: map[string]backend.Backend{"mock": b},
+			OnEvent:  func(ev runner.Event) { rec.Step(id, ev) },
+		})
+		rec.End(id, res, err)
+	}
+	return path
+}
+
+func TestReplayRecordedRuns(t *testing.T) {
+	runs := recordRuns(t,
+		map[string]any{"sender": "carol", "message": "hi"},
+		map[string]any{"sender": "boss", "message": "urgent"},
+	)
+	m, err := New("testdata/inbox.yaml", nil, "mock", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetRuns(runs); err != nil {
+		t.Fatal(err)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 44})
+	screen := ansi.Strip(m.View())
+	if !strings.Contains(screen, "[2] Runs · 2 recorded") || !strings.Contains(screen, "message=urgent sender=boss") {
+		t.Fatalf("want runs listed, newest first:\n%s", screen)
+	}
+
+	// Open the older run (carol), which went through 5 nodes.
+	m.Update(press("2"))
+	m.Update(press("j"))
+	if _, cmd := m.Update(press("enter")); cmd != nil {
+		t.Fatal("opening a run must not start a live one")
+	}
+	screen = ansi.Strip(m.View())
+	for _, want := range []string{"Inputs · from run", "sender   carol", "replay 5/5", "●  SHELL   schedule"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("opened run: missing %q:\n%s", want, screen)
+		}
+	}
+
+	// s restarts the replay and walks it one step at a time.
+	m.Update(press("s"))
+	if m.replayK != 1 || m.run.paused != "intent" || len(m.run.path) != 1 {
+		t.Fatalf("after s: k=%d paused=%q path=%v", m.replayK, m.run.paused, m.run.path)
+	}
+	if bar := ansi.Strip(m.statusBar()); !strings.Contains(bar, "replay 1/5") {
+		t.Errorf("status: %s", bar)
+	}
+	m.Update(press("s"))
+	if m.selected().ID != "intent" || m.replayK != 2 {
+		t.Errorf("replay should follow the step: sel=%q k=%d", m.selected().ID, m.replayK)
+	}
+
+	// r runs the same input again, live.
+	_, cmd := m.Update(press("r"))
+	drive(t, m, cmd)
+	if m.replaying() || m.run.inputs["sender"] != "carol" || !m.run.done {
+		t.Errorf("r should re-run the recorded input live: replaying=%v inputs=%v", m.replaying(), m.run.inputs)
+	}
+}
+
+func TestReplayShowsRecordedFailure(t *testing.T) {
+	runs := recordRuns(t, map[string]any{"sender": "carol"}) // no message: fails at worth_it
+	m, _ := New("testdata/inbox.yaml", nil, "mock", false)
+	m.SetRuns(runs)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m.Update(press("2"))
+	m.Update(press("enter"))
+	if m.run.errNode != "worth_it" || !strings.Contains(ansi.Strip(m.View()), "✗  YES/NO  worth_it") {
+		t.Errorf("errNode=%q\n%s", m.run.errNode, ansi.Strip(m.View()))
+	}
+}
+
+func TestReplayShowsRecordedBackend(t *testing.T) {
+	runs := recordRuns(t, map[string]any{"sender": "carol", "message": "hi"})
+	// Pretend it was recorded with another backend than the TUI's pick.
+	data, _ := os.ReadFile(runs)
+	os.WriteFile(runs, []byte(strings.ReplaceAll(string(data), `"backend":"mock"`, `"backend":"jev"`)), 0o644)
+	m, _ := New("testdata/inbox.yaml", nil, "mock", false)
+	m.SetRuns(runs)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m.Update(press("2"))
+	m.Update(press("enter"))
+	if title := ansi.Strip(m.nodeTitle()); !strings.Contains(title, "worth_it · jev") {
+		t.Errorf("title = %q, want the recorded backend", title)
 	}
 }

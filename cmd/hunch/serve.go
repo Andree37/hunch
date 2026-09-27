@@ -20,6 +20,7 @@ import (
 	"github.com/Andree37/hunch/internal/flow"
 	"github.com/Andree37/hunch/internal/runner"
 	"github.com/Andree37/hunch/internal/tmpl"
+	"github.com/Andree37/hunch/internal/trace"
 )
 
 // cmdServe runs a flow for every POST it receives: the JSON body is the
@@ -59,17 +60,17 @@ func cmdServe(ctx context.Context, args []string) error {
 			return fmt.Errorf("--token-env: $%s is not set", *tokenEnv)
 		}
 	}
-	var trace io.Writer
+	var rec *trace.Writer
 	if *traceFile != "" {
 		tf, err := os.OpenFile(*traceFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 		if err != nil {
 			return err
 		}
 		defer tf.Close()
-		trace = tf
+		rec = trace.NewWriter(tf)
 	}
 
-	h.token, h.trace = token, trace
+	h.token, h.trace = token, rec
 	srv := &http.Server{Addr: *addr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -105,8 +106,7 @@ type server struct {
 	modTime  time.Time
 	checked  time.Time
 
-	traceMu sync.Mutex
-	trace   io.Writer
+	trace *trace.Writer
 }
 
 type runReply struct {
@@ -259,11 +259,14 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), s.timeout)
 	defer cancel()
 	start := time.Now()
+	runID := trace.NewID()
+	s.trace.Start(runID, s.path, f.DefaultBackend, inputsOnly(f, state))
 	res, err := runner.Run(ctx, f, state, runner.Options{
 		Backends: backends,
 		DryRun:   s.dryRun,
-		OnEvent:  s.writeTrace,
+		OnEvent:  func(ev runner.Event) { s.trace.Step(runID, ev) },
 	})
+	s.trace.End(runID, res, err)
 	reply := runReply{Path: res.Path, Outputs: res.Outputs, CostUSD: res.CostUSD}
 	status := http.StatusOK
 	if err != nil {
@@ -284,15 +287,6 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%d %s · %s · $%.6f · %s", status, strings.Join(res.Path, " → "),
 		formatOutputs(res.Outputs), res.CostUSD, time.Since(start).Round(time.Millisecond))
 	writeJSON(w, status, reply)
-}
-
-func (s *server) writeTrace(ev runner.Event) {
-	if s.trace == nil {
-		return
-	}
-	s.traceMu.Lock()
-	defer s.traceMu.Unlock()
-	json.NewEncoder(s.trace).Encode(ev)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

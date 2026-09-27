@@ -242,7 +242,24 @@ curl -H "Authorization: Bearer $HOOK_TOKEN" \
 - **Edits** to the flow file are picked up on the next request; a broken edit
   is logged and the last good flow keeps serving.
 
-## Examples
+## Recording and replaying runs
+
+`--trace file.jsonl` on `hunch run` or `hunch serve` records every run: its
+input, each step (question as asked, what the model saw, probabilities,
+route, cost), and how it ended. Open the recording in the TUI:
+
+```sh
+hunch serve examples/respond.yaml --trace runs.jsonl     # production
+hunch tui examples/respond.yaml --runs runs.jsonl        # look at what happened
+```
+
+- Pane 2 lists the recorded runs, newest first (`t` switches to test cases);
+  it updates while serve keeps recording.
+- Enter loads a run into the graph and path views, with its input in pane 4.
+- `s` replays it one step at a time, exactly as it happened; `r` runs the same
+  input again live, e.g. after changing the flow, to see if it now goes the
+  way it should.
+
 
 Each is a different shape of the same building blocks; none is special.
 
@@ -353,7 +370,7 @@ Keys: `j/k` move · `tab` next pane · `enter` edit / load case · `r` run (noth
 
 - `hunch validate FLOW`: dangling routes, impossible branches, uncovered
   answers, unreachable nodes, loops, refs to nodes that haven't run yet.
-- `hunch tui FLOW [--backend name] [--set k=v]... [--state f.json]`
+- `hunch tui FLOW [--backend name] [--set k=v]... [--state f.json] [--runs file.jsonl]`
 - `hunch test FLOW [--backend name] [--live] [case...]`: run test cases, check expectations. `http` nodes don't send unless `--live`.
 - `hunch serve FLOW [--addr host:port] [--backend name] [--dry-run] [--token-env VAR] [--trace file]`: run the flow for each webhook POST.
 - `hunch run FLOW [--backend name] [--case name] [--set k=v]... [--state f.json] [--trace f.jsonl] [--json] [--max-visits N]`

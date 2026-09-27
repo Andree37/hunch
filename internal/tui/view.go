@@ -60,11 +60,15 @@ func (m *Model) View() string {
 	inputsH = max(min(inputsH, bodyH*2/3), 5)
 	nodeH := bodyH - inputsH
 
-	testsH := max(min(len(m.cases)+3, bodyH/3), 4)
+	listLen := len(m.cases)
+	if m.showRuns {
+		listLen = len(m.runs)
+	}
+	testsH := max(min(listLen+3, bodyH/3), 4)
 	flowH := bodyH - testsH
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		pane(m.flowTitle(), m.flowLines(leftW-4, flowH-3), leftW, flowH, m.focus == focusFlow),
-		pane("[2] Tests", m.caseLines(leftW-4, testsH-3), leftW, testsH, m.focus == focusTests),
+		pane(m.pane2Title(), m.pane2Lines(leftW-4, testsH-3), leftW, testsH, m.focus == focusTests),
 	)
 	right := lipgloss.JoinVertical(lipgloss.Left,
 		pane("[3] "+m.nodeTitle(), m.scrolledNodeLines(rightW-4, nodeH-3), rightW, nodeH, m.focus == focusNode),
@@ -199,11 +203,7 @@ func (m *Model) nodeTitle() string {
 	}
 	t := badge(n) + " " + n.ID
 	if n.Kind.IsDecision() {
-		b := n.Backend
-		if b == "" {
-			b = m.backend
-		}
-		t += fmt.Sprintf(" · %s · threshold %.2f", b, m.flow.ThresholdFor(n))
+		t += fmt.Sprintf(" · %s · threshold %.2f", m.backendOf(n), m.flow.ThresholdFor(n))
 	}
 	return t
 }
@@ -373,14 +373,25 @@ func (m *Model) actionLines(n *flow.Node, ev runner.Event, ran bool, w int) []st
 	return lines
 }
 
+// backendOf names the backend behind a node's answer on screen: what the
+// shown run actually used, falling back to the node's own or the TUI's pick.
+func (m *Model) backendOf(n *flow.Node) string {
+	if ev, ok := m.eventFor(n.ID); ok && ev.Backend != "" {
+		return ev.Backend
+	}
+	if n.Backend != "" {
+		return n.Backend
+	}
+	if m.replay != nil && m.replay.Backend != "" {
+		return m.replay.Backend
+	}
+	return m.backend
+}
+
 func (m *Model) confidenceLine(n *flow.Node, d backend.Decision) string {
 	th := m.flow.ThresholdFor(n)
 	s := fmt.Sprintf("confidence %.2f  (threshold %.2f)", d.Confidence, th)
-	name := n.Backend
-	if name == "" {
-		name = m.backend // the one picked in the TUI, not the flow's default
-	}
-	if cfg, ok := m.flow.Backends[name]; ok && backend.SelfReported(cfg.Kind) {
+	if cfg, ok := m.flow.Backends[m.backendOf(n)]; ok && backend.SelfReported(cfg.Kind) {
 		s += "  self-reported"
 	}
 	if d.Confidence >= th {
@@ -583,6 +594,23 @@ func (m *Model) modeLabel() string {
 	return sYellow.Render("dry run")
 }
 
+func (m *Model) pane2Title() string {
+	switch {
+	case m.showRuns:
+		return fmt.Sprintf("[2] Runs · %d recorded  (t tests)", len(m.runs))
+	case m.runsPath != "":
+		return "[2] Tests  (t runs)"
+	}
+	return "[2] Tests"
+}
+
+func (m *Model) pane2Lines(w, h int) []string {
+	if m.showRuns {
+		return m.runLines(w, h)
+	}
+	return m.caseLines(w, h)
+}
+
 func (m *Model) flowTitle() string {
 	if m.flowView == viewPath && m.run != nil && len(m.run.path) > 0 {
 		return "[1] Flow · path  (v graph)"
@@ -591,6 +619,9 @@ func (m *Model) flowTitle() string {
 }
 
 func (m *Model) inputsTitle() string {
+	if m.replay != nil {
+		return "Inputs · from run " + m.replay.ID
+	}
 	if m.active < 0 {
 		return "Inputs · unsaved"
 	}
@@ -652,6 +683,8 @@ func (m *Model) caseLines(w, h int) []string {
 func (m *Model) statusBar() string {
 	var left string
 	switch {
+	case m.replaying() && m.editing == editNone:
+		left = " s next step · r run again live · enter open another run · v graph/path · q quit"
 	case m.run != nil && !m.run.done && m.run.paused == "" && m.editing == editNone:
 		left = " x stop · 1-4 panes"
 	case m.pausedRun():
@@ -675,6 +708,11 @@ func (m *Model) statusBar() string {
 	right := "backend " + m.backend + " · " + m.modeLabel()
 	if r := m.run; r != nil {
 		switch {
+		case m.replaying():
+			right = sTitle.Render(fmt.Sprintf("replay %d/%d", m.replayK, len(m.replay.Steps))) + fmt.Sprintf(" · recorded %s · $%.6f", m.replay.Time.Local().Format("Jan 2 15:04"), r.cost)
+			if m.replay.Backend != "" {
+				right += " · backend " + m.replay.Backend
+			}
 		case r.paused != "":
 			right = fmt.Sprintf("%s ⏸ next: %s · %d steps · $%.6f · %s", sYellow.Render("paused"), r.paused, len(r.path), r.cost, right)
 		case !r.done:

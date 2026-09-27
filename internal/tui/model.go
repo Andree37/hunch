@@ -28,6 +28,7 @@ import (
 	"github.com/Andree37/hunch/internal/flow"
 	"github.com/Andree37/hunch/internal/runner"
 	"github.com/Andree37/hunch/internal/tmpl"
+	"github.com/Andree37/hunch/internal/trace"
 	"github.com/Andree37/hunch/internal/validate"
 )
 
@@ -108,7 +109,15 @@ type Model struct {
 	nodeScroll int
 
 	flowView flowView
-	live     bool // http nodes really send; off by default
+
+	runsPath  string // recorded runs file, if any
+	runsMod   time.Time
+	runs      []*trace.Run // newest first
+	runCursor int
+	showRuns  bool       // pane 2 lists runs instead of test cases
+	replay    *trace.Run // recorded run shown in the views
+	replayK   int        // how many of its steps are shown
+	live      bool       // http nodes really send; off by default
 
 	flash         string
 	width, height int
@@ -239,6 +248,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.flash = "reloaded " + filepath.Base(m.path)
 			}
 		}
+		m.refreshRuns()
 		if casesStamp(m.path) != m.casesStamp {
 			if err := m.loadCases(); err != nil {
 				m.flash = "tests: " + err.Error()
@@ -338,7 +348,11 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case focusInputs:
 			m.inputCursor = min(m.inputCursor+1, len(m.inputs)-1)
 		case focusTests:
-			m.caseCursor = min(m.caseCursor+1, len(m.cases)-1)
+			if m.showRuns {
+				m.runCursor = max(min(m.runCursor+1, len(m.runs)-1), 0)
+			} else {
+				m.caseCursor = min(m.caseCursor+1, len(m.cases)-1)
+			}
 		case focusNode:
 			m.nodeScroll++
 		}
@@ -350,11 +364,19 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case focusInputs:
 			m.inputCursor = max(m.inputCursor-1, 0)
 		case focusTests:
-			m.caseCursor = max(m.caseCursor-1, 0)
+			if m.showRuns {
+				m.runCursor = max(m.runCursor-1, 0)
+			} else {
+				m.caseCursor = max(m.caseCursor-1, 0)
+			}
 		case focusNode:
 			m.nodeScroll = max(m.nodeScroll-1, 0)
 		}
 	case "r":
+		if m.replaying() {
+			m.replay = nil // run the loaded input again, live
+			return m, m.startRun(false)
+		}
 		// A paused run carries on to the end, unless the inputs changed
 		// since it started; then start fresh.
 		if m.resumable() {
@@ -364,6 +386,10 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.startRun(false)
 	case "s":
+		if m.replaying() {
+			m.stepReplay()
+			return m, nil
+		}
 		if m.resumable() {
 			m.step()
 			return m, nil
@@ -409,8 +435,15 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch {
 		case m.focus == focusInputs && len(m.inputs) > 0:
 			return m, m.editInput()
-		case m.focus == focusTests && len(m.cases) > 0:
+		case m.focus == focusTests && m.showRuns && len(m.runs) > 0:
+			m.openRun(m.runCursor)
+		case m.focus == focusTests && !m.showRuns && len(m.cases) > 0:
+			m.replay = nil
 			m.useCase(m.caseCursor)
+		}
+	case "t":
+		if m.runsPath != "" {
+			m.showRuns = !m.showRuns
 		}
 	case "a":
 		m.focus = focusInputs
@@ -626,6 +659,7 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 	if m.run != nil && m.run.done && m.run.err == nil {
 		m.prev = m.run
 	}
+	m.replay = nil
 	m.runID++
 	id := m.runID
 	m.run = &run{events: map[string]runner.Event{}, started: time.Now(), caseIdx: -1}

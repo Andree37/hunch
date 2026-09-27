@@ -13,6 +13,7 @@ import (
 
 	"github.com/Andree37/hunch/internal/backend"
 	"github.com/Andree37/hunch/internal/flow"
+	"github.com/Andree37/hunch/internal/trace"
 )
 
 func testServer(t *testing.T, token string) *server {
@@ -110,7 +111,7 @@ func TestServeToken(t *testing.T) {
 func TestServeReportsFailedNode(t *testing.T) {
 	s := testServer(t, "")
 	var buf bytes.Buffer
-	s.trace = &buf
+	s.trace = trace.NewWriter(&buf)
 	// check's question needs order.note; an empty order makes it fail there.
 	code, reply := post(t, s, `{"plan": "pro", "order": {}}`, "")
 	if code != 500 || reply.Node != "check" || !strings.Contains(reply.Error, "order.note") {
@@ -128,7 +129,7 @@ func TestServeDedupe(t *testing.T) {
 	s := testServer(t, "")
 	s.dedupeKey = "{{order.id}}"
 	var buf bytes.Buffer
-	s.trace = &buf
+	s.trace = trace.NewWriter(&buf)
 
 	body := `{"plan": "pro", "order": {"id": 42, "note": "refund please"}}`
 	code1, first := post(t, s, body, "")
@@ -149,7 +150,7 @@ func TestServeDedupe(t *testing.T) {
 func TestServeIdempotencyKeyHeader(t *testing.T) {
 	s := testServer(t, "")
 	var buf bytes.Buffer
-	s.trace = &buf
+	s.trace = trace.NewWriter(&buf)
 	send := func() int {
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"plan": "free", "order": {}}`))
 		req.Header.Set("Idempotency-Key", "evt-1")
@@ -166,7 +167,7 @@ func TestServeFailedRunCanBeRetried(t *testing.T) {
 	s := testServer(t, "")
 	s.dedupeKey = "{{order.id}}"
 	var buf bytes.Buffer
-	s.trace = &buf
+	s.trace = trace.NewWriter(&buf)
 	body := `{"plan": "pro", "order": {"id": 9}}` // no note: fails at check
 	c1, _ := post(t, s, body, "")
 	c2, _ := post(t, s, body, "")

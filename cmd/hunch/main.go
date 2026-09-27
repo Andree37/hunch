@@ -18,6 +18,7 @@ import (
 	"github.com/Andree37/hunch/internal/flow"
 	"github.com/Andree37/hunch/internal/runner"
 	"github.com/Andree37/hunch/internal/tmpl"
+	"github.com/Andree37/hunch/internal/trace"
 	"github.com/Andree37/hunch/internal/tui"
 	"github.com/Andree37/hunch/internal/validate"
 )
@@ -26,7 +27,7 @@ const usage = `hunch: decision flows with typed, calibrated answers
 
 usage:
   hunch validate FLOW
-  hunch tui FLOW [--backend name] [--set key=value]... [--state file.json]
+  hunch tui FLOW [--backend name] [--set key=value]... [--state file.json] [--runs file.jsonl]
   hunch run FLOW [--backend name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl] [--json] [--dry-run]
   hunch test FLOW [--backend name] [--live] [name...]
   hunch serve FLOW [--addr 127.0.0.1:8080] [--backend name] [--dry-run] [--token-env VAR] [--trace file.jsonl]
@@ -130,11 +131,8 @@ func cmdRun(ctx context.Context, args []string) error {
 		if err := c.CheckFakes(f); err != nil {
 			return err
 		}
-		for k, v := range c.Input {
-			f.State[k] = v
-		}
 	}
-	state, err := initialState(f, *stateFile, sets)
+	state, err := initialState(f, caseInput(c), *stateFile, sets)
 	if err != nil {
 		return err
 	}
@@ -151,15 +149,17 @@ func cmdRun(ctx context.Context, args []string) error {
 		backends[name] = b
 	}
 
-	var trace *json.Encoder
+	var rec *trace.Writer
 	if *traceFile != "" {
 		tf, err := os.OpenFile(*traceFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 		if err != nil {
 			return err
 		}
 		defer tf.Close()
-		trace = json.NewEncoder(tf)
+		rec = trace.NewWriter(tf)
 	}
+	runID := trace.NewID()
+	rec.Start(runID, path, f.DefaultBackend, inputsOnly(f, state))
 
 	ctx = backend.WithStatus(ctx, func(note string) { fmt.Fprintln(os.Stderr, "    …", note) })
 	res, err := runner.Run(ctx, f, state, runner.Options{
@@ -170,11 +170,10 @@ func cmdRun(ctx context.Context, args []string) error {
 		Stdout:    progress,
 		OnEvent: func(ev runner.Event) {
 			printEvent(progress, ev)
-			if trace != nil {
-				trace.Encode(ev)
-			}
+			rec.Step(runID, ev)
 		},
 	})
+	rec.End(runID, res, err)
 	if err != nil {
 		return err
 	}
@@ -198,6 +197,7 @@ func cmdTUI(args []string) error {
 	fs.Var(&sets, "set", "set a state field, key=value (repeatable)")
 	stateFile := fs.String("state", "", "JSON file with initial state")
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
+	runsFile := fs.String("runs", "", "recorded runs to list and replay (from run/serve --trace)")
 	path, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -210,15 +210,20 @@ func cmdTUI(args []string) error {
 	// the runner, not something to edit in the TUI.
 	inputs := *f
 	inputs.State = nil
-	state, err := initialState(&inputs, *stateFile, sets)
+	state, err := initialState(&inputs, nil, *stateFile, sets)
 	if err != nil {
 		return err
 	}
 	// Explicit input wins; otherwise start from the first test case.
 	fromCase := len(sets) == 0 && *stateFile == ""
-	m, err := tui.New(path, state, *backendName, fromCase)
+	m, err := tui.New(path, state, *backendName, fromCase && *runsFile == "")
 	if err != nil {
 		return err
+	}
+	if *runsFile != "" {
+		if err := m.SetRuns(*runsFile); err != nil {
+			return err
+		}
 	}
 	return tui.Run(m)
 }
@@ -353,6 +358,25 @@ func checkInputs(f *flow.Flow, state map[string]any) error {
 	return nil
 }
 
+func caseInput(c *cases.Case) map[string]any {
+	if c == nil {
+		return nil
+	}
+	return c.Input
+}
+
+// inputsOnly drops the flow's own constants from a run's state, leaving what
+// the run was given.
+func inputsOnly(f *flow.Flow, state map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range state {
+		if _, constant := f.State[k]; !constant {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 func caseFakes(c *cases.Case) map[string]runner.FakeResponse {
 	if c == nil {
 		return nil
@@ -409,11 +433,12 @@ func loadChecked(path string, w io.Writer) (*flow.Flow, error) {
 	return f, nil
 }
 
-func initialState(f *flow.Flow, stateFile string, sets []string) (map[string]any, error) {
+// initialState layers a run's state: the flow's constants, then a test
+// case's input, then --state, then --set.
+func initialState(f *flow.Flow, caseIn map[string]any, stateFile string, sets []string) (map[string]any, error) {
 	state := map[string]any{}
-	for k, v := range f.State {
-		state[k] = v
-	}
+	maps.Copy(state, f.State)
+	maps.Copy(state, caseIn)
 	if stateFile != "" {
 		data, err := os.ReadFile(stateFile)
 		if err != nil {
