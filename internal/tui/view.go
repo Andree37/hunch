@@ -376,6 +376,13 @@ func (m *Model) actionLines(n *flow.Node, ev runner.Event, ran bool, w int) []st
 func (m *Model) confidenceLine(n *flow.Node, d backend.Decision) string {
 	th := m.flow.ThresholdFor(n)
 	s := fmt.Sprintf("confidence %.2f  (threshold %.2f)", d.Confidence, th)
+	name := n.Backend
+	if name == "" {
+		name = m.backend // the one picked in the TUI, not the flow's default
+	}
+	if cfg, ok := m.flow.Backends[name]; ok && backend.SelfReported(cfg.Kind) {
+		s += "  self-reported"
+	}
 	if d.Confidence >= th {
 		return sDim.Render(s)
 	}

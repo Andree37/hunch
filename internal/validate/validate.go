@@ -88,8 +88,10 @@ func (v *validator) node(n *flow.Node) {
 		name := v.f.BackendFor(n)
 		if name == "" {
 			v.errorf(n.ID, "no backend (set backends.default or backend on the node)")
-		} else if _, ok := v.f.Backends[name]; !ok {
+		} else if cfg, ok := v.f.Backends[name]; !ok {
 			v.errorf(n.ID, "backend %q is not defined", name)
+		} else if _, unsure := n.Then.Get(flow.Unsure); backend.SelfReported(cfg.Kind) && (unsure || n.Threshold > 0) {
+			v.warnf(n.ID, "routes on confidence, but %s (%s) reports its own confidence; it isn't calibrated like Jev's, so test the threshold", name, cfg.Kind)
 		}
 		if len(n.Then.Targets()) == 0 {
 			v.warnf(n.ID, "has no `then`, so its answer is never used")

@@ -52,6 +52,16 @@ func New(cfg flow.BackendConfig) (Backend, error) {
 	return nil, fmt.Errorf("backend %q: unknown kind %q (want mock, jev, openai, anthropic, bedrock)", cfg.Name, cfg.Kind)
 }
 
+// SelfReported reports whether a kind's confidence is the model's own
+// estimate rather than calibrated, so thresholds on it mean less.
+func SelfReported(kind string) bool {
+	switch kind {
+	case "openai", "anthropic", "bedrock":
+		return true
+	}
+	return false
+}
+
 // CanWrite reports whether backends of a kind can generate text for `llm`
 // nodes. Every kind can make decisions.
 func CanWrite(kind string) bool {

@@ -60,6 +60,7 @@ func TestIssues(t *testing.T) {
 		{"switch unsure", `nodes: {a: {switch: "{{x}}", then: {unsure: a, _: a}}}`, Error, "never unsure"},
 		{"switch no default", `nodes: {a: {switch: "{{x}}", then: {v: a}}}`, Warning, "any other value stops the run"},
 		{"sees a later node", `nodes: {a: {bool: q, sees: [b.answer], then: b}, b: {action: log, message: m}}`, Error, "never runs before"},
+		{"unsure on self-reported", `{backends: {default: c, c: {kind: anthropic, model: m}}, nodes: {a: {bool: q, then: {yes: a, no: a, unsure: a}}}}`, Warning, "reports its own confidence"},
 		{"unused input", `{inputs: {x: [a, b]}, nodes: {a: {action: log, message: m}}}`, Warning, `input "x" is declared but no node uses it`},
 		{"ref to later node", `nodes: {a: {bool: "{{b.answer}}?", then: b}, b: {action: log, message: m}}`, Error, "never runs before"},
 	}

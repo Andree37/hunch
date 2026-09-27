@@ -273,6 +273,11 @@ aren't calibrated the way Jev's are.
 | `anthropic` | ✓ | ✓ | Claude via the Anthropic API. `model` (e.g. `claude-opus-5`), `api_key_env` (default `ANTHROPIC_API_KEY`), `base_url`. |
 | `bedrock` | ✓ | ✓ | Any Amazon Bedrock model via the Converse API. `model` (model or inference profile ID), `region`, `profile`; AWS credentials from the usual chain. |
 
+Routing on confidence (`unsure`, `threshold`) is most meaningful with Jev.
+The validator warns when a chat model's self-reported confidence drives a
+route, and the TUI marks those numbers `self-reported`; check such
+thresholds against your test cases.
+
 Chat backends also take `max_tokens`, `timeout`, and `price_in_per_mtok` / `price_out_per_mtok` to report cost.
 
 ## Test cases
