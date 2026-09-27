@@ -298,6 +298,19 @@ expect:                  # optional
   sent.action: sent      # a field an action produced (output, llm, http)
 ```
 
+Flows that fetch data can be tested offline: `http:` gives a canned response
+for an http node by name, for any method, instead of calling anything (the
+TUI shows it as `FAKED`).
+
+```yaml
+input:
+  record_id: 7
+http:
+  fetch:                  # the http node's name
+    status: 200           # default
+    body: {title: "Logo blurry", status: open}
+```
+
 `hunch test examples/inbox.yaml --backend jev` runs every case and reports
 pass/fail, which is also how you compare backends: the mock passes 0/3 of the
 example cases, Jev 3/3.

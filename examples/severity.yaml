@@ -2,22 +2,15 @@
 # fit, then say why on the ticket. It never raises a severity, and only
 # sev2 and sev2.5 tickets are checked.
 #
-# Triggered by a webhook when a ticket is created:
+# Triggered by a webhook when a ticket is created; the webhook only sends the
+# id, and the flow fetches the ticket itself:
 #
 #   export TICKETS_API=https://tickets.example.com/api TICKETS_TOKEN=...
-#   hunch serve examples/severity.yaml --backend jev --token-env HOOK_TOKEN
-#   curl -H "Authorization: Bearer $HOOK_TOKEN" -d @ticket.json http://127.0.0.1:8080/
+#   hunch serve examples/severity.yaml --backend jev --token-env HOOK_TOKEN --dedupe-key '{{ticket_id}}'
+#   curl -H "Authorization: Bearer $HOOK_TOKEN" -d '{"ticket_id": 123}' http://127.0.0.1:8080/
 #
-# where ticket.json is the webhook body, e.g.
-#   {"ticket": {"id": 123, "severity": "sev2", "title": "...", "description": "...", "request": "..."}}
-#
-# If your webhook only sends an id, add a GET node first and read the ticket
-# from it instead (GETs still run in dry runs):
-#   fetch: {action: http, method: GET, url: "$TICKETS_API/tickets/{{ticket_id}}",
-#           headers: {Authorization: "Bearer $TICKETS_TOKEN"}, then: scope}
-#   ...then use {{fetch.body.severity}} and so on below.
-#
-# Try it without touching real tickets (writes are only recorded):
+# Try it without touching real tickets: the test cases fake the fetch, and
+# writes are only recorded.
 #   hunch tui examples/severity.yaml
 #   hunch test examples/severity.yaml --backend jev
 name: severity-check
@@ -38,10 +31,20 @@ state:
     sev2.5: A core feature is degraded for some users, or a workaround exists.
     sev3: A minor issue, a cosmetic problem, a question, or a feature request.
 
+inputs:
+  ticket_id: {type: number, description: The id the webhook sends}
+
 nodes:
+  fetch:
+    action: http
+    method: GET
+    url: "$TICKETS_API/tickets/{{ticket_id}}"
+    headers: {Authorization: "Bearer $TICKETS_TOKEN"}
+    then: scope
+
   # A rule, not a model: only these two severities are checked.
   scope:
-    switch: "{{ticket.severity}}"
+    switch: "{{fetch.body.severity}}"
     then:
       sev2: from_sev2
       sev2.5: from_sev2_5
@@ -51,27 +54,27 @@ nodes:
   from_sev2:
     choice: |-
       Under our SLA, which severity does this ticket really have? It was filed as sev2.
-      Title: {{ticket.title}}
-      Description: {{ticket.description}}
-      Request: {{ticket.request}}
+      Title: {{fetch.body.title}}
+      Description: {{fetch.body.description}}
+      Request: {{fetch.body.request}}
     options:
       sev2: "{{sla.sev2}}"
       sev2.5: "{{sla.sev2.5}}"
       sev3: "{{sla.sev3}}"
-    sees: [ticket.title, ticket.description, ticket.request, sla]
+    sees: [fetch.body.title, fetch.body.description, fetch.body.request, sla]
     threshold: 0.7
     then: {sev2: within_sla, unsure: for_human, _: lower_from_sev2}
 
   from_sev2_5:
     choice: |-
       Under our SLA, which severity does this ticket really have? It was filed as sev2.5.
-      Title: {{ticket.title}}
-      Description: {{ticket.description}}
-      Request: {{ticket.request}}
+      Title: {{fetch.body.title}}
+      Description: {{fetch.body.description}}
+      Request: {{fetch.body.request}}
     options:
       sev2.5: "{{sla.sev2.5}}"
       sev3: "{{sla.sev3}}"
-    sees: [ticket.title, ticket.description, ticket.request, sla]
+    sees: [fetch.body.title, fetch.body.description, fetch.body.request, sla]
     threshold: 0.7
     then: {sev2.5: within_sla, unsure: for_human, _: lower_from_sev2_5}
 
@@ -95,8 +98,8 @@ nodes:
       - sev3: {{sla.sev3}}
 
       This ticket was filed as {{outputs.from}} and is being moved to {{outputs.to}}.
-      Title: {{ticket.title}}
-      Description: {{ticket.description}}
+      Title: {{fetch.body.title}}
+      Description: {{fetch.body.description}}
 
       In two or three sentences, explain why it fits {{outputs.to}} rather than {{outputs.from}}.
     then: update
@@ -104,17 +107,19 @@ nodes:
   update:
     action: http
     method: PATCH
-    url: "$TICKETS_API/tickets/{{ticket.id}}"
+    url: "$TICKETS_API/tickets/{{ticket_id}}"
     headers: {Authorization: "Bearer $TICKETS_TOKEN"}
     body: {severity: "{{outputs.to}}"}
+    idempotency_key: "severity-{{ticket_id}}"
     then: comment
 
   comment:
     action: http
     method: POST
-    url: "$TICKETS_API/tickets/{{ticket.id}}/comments"
+    url: "$TICKETS_API/tickets/{{ticket_id}}/comments"
     headers: {Authorization: "Bearer $TICKETS_TOKEN"}
     body: {body: "{{explain.text}}"}
+    idempotency_key: "severity-note-{{ticket_id}}"
 
   within_sla:
     action: output

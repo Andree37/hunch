@@ -24,6 +24,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/Andree37/hunch/internal/flow"
+	"github.com/Andree37/hunch/internal/runner"
 	"github.com/Andree37/hunch/internal/tmpl"
 )
 
@@ -34,6 +35,7 @@ type Case struct {
 	Keys        []string // input keys, in file order
 	Input       map[string]any
 	Expect      []Expectation
+	HTTP        map[string]runner.FakeResponse // canned responses by http node name
 }
 
 type Expectation struct {
@@ -107,6 +109,12 @@ func Parse(data []byte) (*Case, error) {
 				c.Keys = append(c.Keys, key)
 				c.Input[key] = val
 			}
+		case "http":
+			fakes, err := parseFakes(v)
+			if err != nil {
+				return nil, err
+			}
+			c.HTTP = fakes
 		case "expect":
 			if v.Kind != yaml.MappingNode {
 				return nil, fmt.Errorf("line %d: expect must be a map", v.Line)
@@ -115,7 +123,7 @@ func Parse(data []byte) (*Case, error) {
 				c.Expect = append(c.Expect, Expectation{Target: v.Content[j].Value, Want: v.Content[j+1].Value})
 			}
 		default:
-			return nil, fmt.Errorf("line %d: unknown field %q (want description, input, expect)", k.Line, k.Value)
+			return nil, fmt.Errorf("line %d: unknown field %q (want description, input, http, expect)", k.Line, k.Value)
 		}
 	}
 	return c, nil
@@ -148,6 +156,57 @@ func (c *Case) Save() error {
 		out = []byte(strings.TrimPrefix(string(out), "{}\n"))
 	}
 	return os.WriteFile(c.Path, out, 0o644)
+}
+
+func parseFakes(n *yaml.Node) (map[string]runner.FakeResponse, error) {
+	if n.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("line %d: http must map node names to responses", n.Line)
+	}
+	out := map[string]runner.FakeResponse{}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		name, v := n.Content[i].Value, n.Content[i+1]
+		var raw struct {
+			Status int `yaml:"status"`
+			Body   any `yaml:"body"`
+		}
+		if err := v.Decode(&raw); err != nil {
+			return nil, fmt.Errorf("line %d: http %s: %v", v.Line, name, err)
+		}
+		if raw.Status == 0 {
+			raw.Status = 200
+		}
+		out[name] = runner.FakeResponse{Status: raw.Status, Body: normalize(raw.Body)}
+	}
+	return out, nil
+}
+
+// normalize turns YAML's decoded maps into the map[string]any the rest of
+// hunch reads.
+func normalize(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, e := range x {
+			x[k] = normalize(e)
+		}
+		return x
+	case []any:
+		for i, e := range x {
+			x[i] = normalize(e)
+		}
+		return x
+	}
+	return v
+}
+
+// CheckFakes reports faked names that aren't http nodes in f.
+func (c *Case) CheckFakes(f *flow.Flow) error {
+	for name := range c.HTTP {
+		n := f.Node(name)
+		if n == nil || n.Kind != flow.Action || n.Action.Type != flow.ActHTTP {
+			return fmt.Errorf("test %s fakes %q, which isn't an http node in the flow", c.Name, name)
+		}
+	}
+	return nil
 }
 
 // Check compares a finished run's state against the case's expectations.

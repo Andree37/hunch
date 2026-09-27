@@ -247,3 +247,29 @@ func TestHTTPRetryReportsStatus(t *testing.T) {
 		t.Errorf("notes = %q", notes)
 	}
 }
+
+func TestFakeHTTPResponses(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	defer srv.Close()
+	f, _ := flow.Parse([]byte(`nodes:
+  fetch: {action: http, method: GET, url: "{{base}}/items/1", then: use}
+  use: {action: log, message: "got {{fetch.body.title}}", then: save}
+  save: {action: http, method: PATCH, url: "{{base}}/items/1"}
+`))
+	fakes := map[string]FakeResponse{
+		"fetch": {Status: 200, Body: map[string]any{"title": "Widget"}},
+		"save":  {Status: 200},
+	}
+	res, err := Run(context.Background(), f, map[string]any{"base": srv.URL}, Options{Fake: fakes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called || res.State["use"].(map[string]any)["message"] != "got Widget" || res.State["save"].(map[string]any)["faked"] != true {
+		t.Errorf("called=%v state=%v", called, res.State)
+	}
+	fakes["save"] = FakeResponse{Status: 409}
+	if _, err := Run(context.Background(), f, map[string]any{"base": srv.URL}, Options{Fake: fakes}); err == nil || !strings.Contains(err.Error(), "409 (faked)") {
+		t.Errorf("faked error status: %v", err)
+	}
+}

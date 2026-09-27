@@ -73,6 +73,13 @@ func httpNode(ctx context.Context, n *flow.Node, state map[string]any, opts Opti
 	if err != nil {
 		return err
 	}
+	if fake, ok := opts.Fake[n.ID]; ok {
+		ev.Output = map[string]any{"status": fake.Status, "body": fake.Body, "faked": true}
+		if fake.Status >= 300 {
+			return fmt.Errorf("%s %s: HTTP %d (faked)", a.Method, rawURL, fake.Status)
+		}
+		return nil
+	}
 	if opts.DryRun && a.Method != http.MethodGet {
 		out := map[string]any{"dry_run": true, "method": a.Method, "url": rawURL}
 		if body != nil {

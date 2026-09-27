@@ -645,6 +645,11 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 
 	f := *m.flow
 	f.DefaultBackend = m.backend
+	// A loaded test case's canned http responses apply to its runs.
+	var fakes map[string]runner.FakeResponse
+	if m.active >= 0 {
+		fakes = m.cases[m.active].HTTP
+	}
 	state := m.state()
 	m.run.inputs = m.state()
 
@@ -669,6 +674,7 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 			Backends: backends,
 			Stdout:   io.Discard,
 			DryRun:   !m.live,
+			Fake:     fakes,
 			Before: func(ctx context.Context, node string) error {
 				if !stepMode.Load() {
 					return nil

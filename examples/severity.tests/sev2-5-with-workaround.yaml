@@ -1,10 +1,12 @@
 description: A sev2.5 with a workaround stays sev2.5 (it can't be raised to sev2)
 input:
-  ticket:
-    id: 104
-    severity: sev2.5
-    title: CSV export times out for large accounts
-    description: Exports over 50k rows time out for about 20 customers. Exporting by date range works as a workaround.
-    request: Please make large exports work.
+  ticket_id: 104
+http:
+  fetch:
+    body:
+      severity: sev2.5
+      title: CSV export times out for large accounts
+      description: Exports over 50k rows time out for about 20 customers. Exporting by date range works as a workaround.
+      request: Please make large exports work.
 expect:
   from_sev2_5: sev2.5

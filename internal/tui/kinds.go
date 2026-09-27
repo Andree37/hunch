@@ -186,6 +186,9 @@ func actionView(a *flow.ActionSpec, ev runner.Event, ran bool) string {
 		if out["dry_run"] == true {
 			return sYellow.Render("DRY RUN ") + sDim.Render(fmt.Sprintf("%v %v", out["method"], out["url"]))
 		}
+		if out["faked"] == true {
+			return sYellow.Render(fmt.Sprintf("FAKED %v", out["status"])) + sDim.Render(" from the test case")
+		}
 		status, _ := out["status"].(int)
 		if status >= 300 {
 			return sRed.Render(fmt.Sprintf("✗ %d", status))

@@ -118,3 +118,41 @@ nodes:
 		t.Error("Passed should be false")
 	}
 }
+
+func TestFakeHTTP(t *testing.T) {
+	c, err := Parse([]byte(`
+input: {id: 7}
+http:
+  fetch:
+    body: {title: "Logo blurry", tags: [ui], meta: {open: true}}
+  update: {status: 500}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fetch := c.HTTP["fetch"]
+	if fetch.Status != 200 {
+		t.Errorf("default status = %d", fetch.Status)
+	}
+	body := fetch.Body.(map[string]any)
+	if body["title"] != "Logo blurry" || body["meta"].(map[string]any)["open"] != true {
+		t.Errorf("body = %#v", body)
+	}
+	if c.HTTP["update"].Status != 500 {
+		t.Errorf("update = %+v", c.HTTP["update"])
+	}
+
+	f, _ := flow.Parse([]byte(`nodes:
+  fetch: {action: http, method: GET, url: "x", then: update}
+  update: {action: http, url: "x"}
+  note: {action: log, message: m}
+`))
+	c.Name = "t"
+	if err := c.CheckFakes(f); err != nil {
+		t.Errorf("valid fakes: %v", err)
+	}
+	c.HTTP["note"] = c.HTTP["fetch"]
+	if err := c.CheckFakes(f); err == nil || !strings.Contains(err.Error(), `"note", which isn't an http node`) {
+		t.Errorf("err = %v", err)
+	}
+}

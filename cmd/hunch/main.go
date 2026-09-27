@@ -127,6 +127,9 @@ func cmdRun(ctx context.Context, args []string) error {
 		if c, err = findCase(path, *caseName); err != nil {
 			return err
 		}
+		if err := c.CheckFakes(f); err != nil {
+			return err
+		}
 		for k, v := range c.Input {
 			f.State[k] = v
 		}
@@ -163,6 +166,7 @@ func cmdRun(ctx context.Context, args []string) error {
 		Backends:  backends,
 		MaxVisits: *maxVisits,
 		DryRun:    *dryRun,
+		Fake:      caseFakes(c),
 		Stdout:    progress,
 		OnEvent: func(ev runner.Event) {
 			printEvent(progress, ev)
@@ -280,7 +284,12 @@ func cmdTest(ctx context.Context, args []string) error {
 			fmt.Printf("✗ %s: %v\n", c.Name, err)
 			continue
 		}
-		res, err := runner.Run(ctx, f, state, runner.Options{Backends: backends, DryRun: !*live})
+		if err := c.CheckFakes(f); err != nil {
+			failed++
+			fmt.Printf("✗ %s: %v\n", c.Name, err)
+			continue
+		}
+		res, err := runner.Run(ctx, f, state, runner.Options{Backends: backends, DryRun: !*live, Fake: c.HTTP})
 		cost += res.CostUSD
 		switch {
 		case err != nil:
@@ -342,6 +351,13 @@ func checkInputs(f *flow.Flow, state map[string]any) error {
 		}
 	}
 	return nil
+}
+
+func caseFakes(c *cases.Case) map[string]runner.FakeResponse {
+	if c == nil {
+		return nil
+	}
+	return c.HTTP
 }
 
 func printOutputs(w io.Writer, outputs map[string]any) {
@@ -449,6 +465,8 @@ func printEvent(w io.Writer, ev runner.Event) {
 			detail = fmt.Sprintf("wrote %q", first)
 		case out["dry_run"] == true:
 			detail = fmt.Sprintf("dry run: %v %v", out["method"], out["url"])
+		case out["faked"] == true:
+			detail = fmt.Sprintf("faked HTTP %v (from the test case)", out["status"])
 		case out["status"] != nil:
 			detail = fmt.Sprintf("HTTP %v", out["status"])
 		case out["exit_code"] != nil:

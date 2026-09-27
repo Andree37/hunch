@@ -25,6 +25,9 @@ type Options struct {
 	MaxVisits int       // per node, default 5
 	Stdout    io.Writer // shell action output
 	DryRun    bool      // http actions record their request instead of sending it
+	// Fake answers http nodes by name with a canned response, e.g. from a
+	// test case, instead of calling anything.
+	Fake map[string]FakeResponse
 	// Before is called before each node runs and may block, e.g. to step
 	// through a flow one node at a time. An error stops the run.
 	Before  func(ctx context.Context, node string) error
@@ -46,6 +49,11 @@ type Event struct {
 	Next      string             `json:"next,omitempty"`
 	CostUSD   float64            `json:"cost_usd"`
 	Latency   time.Duration      `json:"latency_ns"`
+}
+
+type FakeResponse struct {
+	Status int
+	Body   any
 }
 
 type Result struct {
