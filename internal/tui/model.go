@@ -456,6 +456,8 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.replay = nil
 			m.useCase(m.caseCursor)
 		}
+	case "F":
+		return m, func() tea.Msg { return backToPickerMsg{} }
 	case "t":
 		if m.runsPath != "" {
 			m.showRuns = !m.showRuns

@@ -763,3 +763,46 @@ func TestFlowRunsLoadWithoutFlags(t *testing.T) {
 		t.Errorf("after o: path=%q runs=%d", m2.runsPath, len(m2.runs))
 	}
 }
+
+func TestFindFlows(t *testing.T) {
+	flows := FindFlows("../../examples")
+	var names []string
+	for _, f := range flows {
+		names = append(names, f.Path)
+	}
+	for _, want := range []string{"inbox.yaml", "respond.yaml", "triage.yaml"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("missing %s in %v", want, names)
+		}
+	}
+	for _, f := range flows {
+		if strings.Contains(f.Path, ".tests") {
+			t.Errorf("test cases aren't flows: %s", f.Path)
+		}
+		if f.Path == "triage.yaml" && (f.Name != "network-triage" || f.Tests != 12 || f.Nodes < 20 || !strings.HasPrefix(f.About, "Triage for a network team")) {
+			t.Errorf("triage info = %+v", f)
+		}
+	}
+}
+
+func TestPickerOpensAFlowAndComesBack(t *testing.T) {
+	dir := t.TempDir()
+	src, _ := os.ReadFile("testdata/inbox.yaml")
+	os.WriteFile(filepath.Join(dir, "a.yaml"), src, 0o644)
+	os.WriteFile(filepath.Join(dir, "not-a-flow.yaml"), []byte("hello: world\n"), 0o644)
+
+	a := NewApp(dir, OpenOptions{FromCase: true})
+	a.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	if len(a.flows) != 1 || !strings.Contains(ansi.Strip(a.View()), "Pick a flow · 1 found") {
+		t.Fatalf("flows = %+v\n%s", a.flows, ansi.Strip(a.View()))
+	}
+	a.Update(press("enter"))
+	if a.main == nil || !strings.Contains(ansi.Strip(a.View()), "[1] Flow") {
+		t.Fatalf("enter should open the flow:\n%s", ansi.Strip(a.View()))
+	}
+	_, cmd := a.Update(press("F"))
+	a.Update(cmd())
+	if a.main != nil || !strings.Contains(ansi.Strip(a.View()), "Pick a flow") {
+		t.Errorf("F should go back to the picker")
+	}
+}

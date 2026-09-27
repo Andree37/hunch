@@ -707,7 +707,7 @@ func (m *Model) statusBar() string {
 	case m.focus == focusNode:
 		left = " j/k scroll · r run · s step · 1-4 panes · q quit"
 	default:
-		left = " j/k select · r run · s step · v graph/path · b backend · L live/dry · 1-4 panes · q quit"
+		left = " j/k select · r run · s step · v graph/path · b backend · L live/dry · 1-4 panes · F flows · q quit"
 	}
 
 	right := "backend " + m.backend + " · " + m.modeLabel()

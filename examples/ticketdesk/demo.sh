@@ -10,7 +10,7 @@
 #
 #   examples/ticketdesk/demo.sh
 #
-# Then open the recorded runs:  go run ./cmd/hunch tui examples/triage.yaml
+# Then open the recorded runs:  go run ./cmd/hunch tui  (pick network-triage, press 2)
 # (runs are recorded next to the flow, in examples/triage.runs/)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -56,4 +56,4 @@ for t in json.load(sys.stdin):
         print("    comment: " + c["body"])
 '
 echo
-echo "logs: .demo/hunch.log .demo/desk.log · replay: go run ./cmd/hunch tui examples/triage.yaml"
+echo "logs: .demo/hunch.log .demo/desk.log · replay: go run ./cmd/hunch tui  (pick network-triage, press 2)"

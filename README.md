@@ -350,8 +350,8 @@ It creates six tickets and prints what happened to each:
 #6 [sev1 · network] Whole Lisbon office has no internet   (sev1: left to people)
 ```
 
-Replay any of them step by step: `go run ./cmd/hunch tui examples/triage.yaml`
-(the runs are recorded in `examples/triage.runs/`).
+Replay any of them step by step: `go run ./cmd/hunch tui`, pick
+`network-triage`, then `2` for its runs (recorded in `examples/triage.runs/`).
 
 The 12 test cases in `examples/triage.tests/` cover ownership and severity,
 including both readings of "my computer is down":
@@ -448,8 +448,13 @@ example cases, Jev 3/3.
 ## TUI
 
 ```sh
-go run ./cmd/hunch tui examples/inbox.yaml --backend jev
+go run ./cmd/hunch tui                       # pick a flow from this folder
+go run ./cmd/hunch tui examples/triage.yaml  # or open one directly
 ```
+
+With no flow given, the TUI starts on a picker listing every flow under the
+current folder, with its description and how many steps, tests and recorded
+runs it has. `F` inside a flow goes back to it.
 
 - **Flow** (top left): the flow as a tree from the start node, each edge
   labelled with its branch (`yes ▶`, `sales ▶`, `else ▶`); the path the run took
@@ -476,14 +481,14 @@ go run ./cmd/hunch tui examples/inbox.yaml --backend jev
 - Files are watched: edit the flow or a case in your editor and the TUI reloads.
 
 Keys: `j/k` move · `tab` next pane · `enter` edit / load case · `r` run (nothing else runs the flow) ·
-`s` step one node · `v` graph / path view · `L` live / dry run · `x` stop · `1-4` jump to pane · `b` switch backend · `a` add input · `d` delete input · `w` save case ·
+`F` back to the flow picker · `s` step one node · `v` graph / path view · `L` live / dry run · `x` stop · `1-4` jump to pane · `b` switch backend · `a` add input · `d` delete input · `w` save case ·
 `n` save as new case · `q` quit
 
 ## Commands
 
 - `hunch validate FLOW`: dangling routes, impossible branches, uncovered
   answers, unreachable nodes, loops, refs to nodes that haven't run yet.
-- `hunch tui FLOW [--backend name] [--set k=v]... [--state f.json] [--runs file.jsonl]`
+- `hunch tui [FLOW] [--backend name] [--writer name] [--set k=v]... [--state f.json] [--runs place]`: without FLOW, pick one
 - `hunch test FLOW [--backend name] [--live] [case...]`: run test cases, check expectations. `http` nodes don't send unless `--live`.
 - `hunch tune FLOW [--runs file.jsonl] [--backend name] [--no-tests] [--all]`: see what each threshold would do.
 - `hunch serve FLOW [--addr host:port] [--backend name] [--writer name] [--dry-run] [--token-env VAR] [--trace file|dir|s3://...] [--dedupe-key T] [--dedupe-store dir|s3://...]`: run the flow for each webhook POST.

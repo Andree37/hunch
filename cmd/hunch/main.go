@@ -27,7 +27,7 @@ const usage = `hunch: decision flows with typed, calibrated answers
 
 usage:
   hunch validate FLOW
-  hunch tui FLOW [--backend name] [--writer name] [--set key=value]... [--state file.json] [--runs file.jsonl]
+  hunch tui [FLOW] [--backend name] [--writer name] [--set key=value]... [--state file.json] [--runs file.jsonl]
   hunch run FLOW [--backend name] [--writer name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl|dir|s3://b/p] [--json] [--dry-run]
   hunch test FLOW [--backend name] [--writer name] [--live] [name...]
   hunch tune FLOW [--runs file.jsonl] [--backend name] [--writer name] [--no-tests] [--all]
@@ -202,10 +202,22 @@ func cmdTUI(args []string) error {
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
 	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
 	runsFile := fs.String("runs", "", "read recorded runs from here instead of the flow's runs location: a .jsonl file, a directory or s3://bucket/prefix")
-	path, err := parseArgs(fs, args)
+	paths, err := parseOptionalArg(fs, args)
 	if err != nil {
 		return err
 	}
+	opts := tui.OpenOptions{Backend: *backendName, Writer: *writerName, Runs: *runsFile}
+
+	// No flow given: start on the picker, listing the flows in this folder.
+	if len(paths) == 0 {
+		if len(sets) > 0 || *stateFile != "" {
+			return fmt.Errorf("--set and --state need a flow: hunch tui FLOW --set ...")
+		}
+		opts.FromCase = true
+		return tui.RunApp(tui.NewApp(".", opts))
+	}
+
+	path := paths[0]
 	f, err := flow.Load(path)
 	if err != nil {
 		return err
@@ -214,25 +226,35 @@ func cmdTUI(args []string) error {
 	// the runner, not something to edit in the TUI.
 	inputs := *f
 	inputs.State = nil
-	state, err := initialState(&inputs, nil, *stateFile, sets)
-	if err != nil {
+	if opts.State, err = initialState(&inputs, nil, *stateFile, sets); err != nil {
 		return err
 	}
 	// Explicit input wins; otherwise start from the first test case.
-	fromCase := len(sets) == 0 && *stateFile == ""
-	m, err := tui.New(path, state, *backendName, fromCase && *runsFile == "")
+	opts.FromCase = len(sets) == 0 && *stateFile == "" && *runsFile == ""
+	app, err := tui.OpenFlow(".", path, opts)
 	if err != nil {
 		return err
 	}
-	if *runsFile != "" {
-		if err := m.SetRuns(*runsFile); err != nil {
-			return err
+	return tui.RunApp(app)
+}
+
+// parseOptionalArg parses flags around at most one positional argument.
+func parseOptionalArg(fs *flag.FlagSet, args []string) ([]string, error) {
+	var positional []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
 		}
+		if fs.NArg() == 0 {
+			break
+		}
+		positional = append(positional, fs.Arg(0))
+		args = fs.Args()[1:]
 	}
-	if err := m.SetWriter(*writerName); err != nil {
-		return err
+	if len(positional) > 1 {
+		return nil, fmt.Errorf("want at most one flow file\n\n%s", usage)
 	}
-	return tui.Run(m)
+	return positional, nil
 }
 
 func cmdTest(ctx context.Context, args []string) error {
