@@ -1,0 +1,94 @@
+# A general "first response" flow: decide whether and how to answer an
+# incoming message, draft a reply, judge it, then either send it or hand it to
+# a person. Sending is itself a decision in the flow.
+#
+#   hunch tui examples/respond.yaml                   # dry run: nothing is sent
+#   hunch test examples/respond.yaml --backend jev    # Jev decides, mock writes
+#   hunch run examples/respond.yaml --case password-reset --dry-run --json
+#
+# Swap models by changing `default` (who decides) and `writer` (who writes).
+name: first-response
+
+backends:
+  default: mock
+  writer: mock
+  mock: {kind: mock, seed: demo}
+  jev: {kind: jev, provider: typesafe}
+  claude: {kind: anthropic, model: claude-opus-5}
+  bedrock: {kind: bedrock, model: anthropic.claude-opus-5, region: us-east-1}
+  ollama: {kind: openai, base_url: "http://localhost:11434/v1", model: llama3.2}
+
+inputs:
+  channel:
+    options: [email, chat, form]
+    description: Where the message came from
+  message:
+    type: text
+    description: What they wrote
+  post_url:
+    type: text
+    description: Where an approved reply gets posted
+
+nodes:
+  needs_reply:
+    bool: "Does this {{channel}} message need a reply from us? Message: {{message}}"
+    criteria:
+      yes: They ask something, report a problem or want something done
+      no: A thank-you, an automated notice, or nothing to respond to
+    then: {yes: kind, no: ignored, unsure: for_human}
+
+  kind:
+    choice: "What is the sender after?"
+    options:
+      question: They want information or to know how to do something
+      problem: Something is broken or not working for them
+      request: They want us to do or change something
+      feedback: An opinion or suggestion, nothing to fix right now
+    then: draft
+
+  draft:
+    action: llm
+    system: You write short, friendly, accurate first replies. Never promise what you can't know.
+    prompt: |-
+      This is a {{kind.answer}} that came in by {{channel}}:
+
+      {{message}}
+
+      Write the first reply.
+    then: review
+
+  review:
+    score: "How good is this as a first reply? Message: {{message}} Reply: {{draft.text}}"
+    levels:
+      - Wrong or unhelpful
+      - Vague, misses the point
+      - Acceptable but generic
+      - Good, addresses the message
+      - Excellent, specific and complete
+    then: {">=4": can_send, _: for_human}
+
+  can_send:
+    bool: "Is it safe to send this reply without a person checking it? Reply: {{draft.text}}"
+    criteria:
+      yes: Nothing sensitive, no commitments, no account-specific claims
+      no: Mentions money, legal matters, outages, or promises anything
+    threshold: 0.8
+    then: {yes: send, no: for_human, unsure: for_human}
+
+  send:
+    action: http
+    url: "{{post_url}}"
+    body: {channel: "{{channel}}", kind: "{{kind.answer}}", reply: "{{draft.text}}"}
+    then: sent
+
+  sent:
+    action: output
+    set: {action: sent, reply: "{{draft.text}}"}
+
+  for_human:
+    action: output
+    set: {action: needs_human, reply: "{{draft.text?}}"}
+
+  ignored:
+    action: output
+    set: {action: ignored}

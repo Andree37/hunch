@@ -45,6 +45,60 @@ nodes:
     run: say "hi {{who}}"             # refs are escaped for whatever quotes they sit in
 ```
 
+### Actions
+
+Decisions steer; actions do the work. Every action's result lands in state
+under its node name, so later nodes can use it.
+
+| Action | Fields | Result |
+|---|---|---|
+| `log` (shown as SAY) | `message` | `message` |
+| `shell` | `run`, `timeout` (s, default 60) | `stdout`, `exit_code` |
+| `llm` | `prompt`, `system`, `max_tokens`, `backend` | `text` |
+| `http` | `url`, `method` (default POST), `headers`, `body`, `timeout` (s, default 30) | `status`, `body` (parsed if JSON) |
+| `output` | `set: {name: value}` | the values; also the flow's **outputs** |
+
+```yaml
+backends:
+  default: jev          # decides
+  writer: claude        # writes, for llm nodes
+  jev: {kind: jev}
+  claude: {kind: anthropic, model: claude-opus-5}
+
+nodes:
+  draft:
+    action: llm
+    system: You write short, friendly first replies.
+    prompt: "Reply to: {{message}}"
+    then: ok
+  ok:
+    bool: "Safe to send without a person? {{draft.text}}"
+    then: {yes: send, no: hold}
+  send:
+    action: http
+    url: "{{post_url}}"
+    headers: {Authorization: "Bearer $API_TOKEN"}   # $VARS come from the environment / .env
+    body: {reply: "{{draft.text}}"}
+    then: sent
+  sent: {action: output, set: {action: sent}}
+  hold: {action: output, set: {action: needs_human, reply: "{{draft.text}}"}}
+```
+
+- **Sending is a decision.** Put the "should this go out?" question before
+  the `http` node, as above.
+- **Dry runs.** `hunch test` and the TUI never send: `http` nodes record the
+  request they would make. Use `hunch test --live` or `L` in the TUI to send
+  for real. `hunch run` sends unless given `--dry-run`.
+- **Secrets** go in `$VARS` in `url` and `headers`, read from the environment,
+  so they never enter state or any model's prompt. Refs in a URL are escaped.
+- A `body` map is sent as JSON; a ref that is the whole value keeps its type.
+- `output` values are what your code reads: `hunch run --json` prints the
+  final state, and each run prints its outputs. Test cases can expect them:
+  `sent.action: sent`.
+
+See `examples/respond.yaml` for a full flow: decide, draft, judge, then send
+or hand to a person.
+
 ### Inputs
 
 Declare what each input accepts. This holds no values (those come from test
@@ -139,6 +193,7 @@ expect:                  # optional
   worth_it: yes          # bool: yes / no
   intent: meeting        # choice: an option
   tone.urgency: ">=4"    # score: a condition; node.question inside questions nodes
+  sent.action: sent      # a field an action produced (output, llm, http)
 ```
 
 `hunch test examples/inbox.yaml --backend jev` runs every case and reports
@@ -176,7 +231,7 @@ go run ./cmd/hunch tui examples/inbox.yaml --backend jev
 - Files are watched: edit the flow or a case in your editor and the TUI reloads.
 
 Keys: `j/k` move · `tab` next pane · `enter` edit / load case · `r` run (nothing else runs the flow) ·
-`s` step one node · `v` graph / path view · `x` stop · `1-4` jump to pane · `b` switch backend · `a` add input · `d` delete input · `w` save case ·
+`s` step one node · `v` graph / path view · `L` live / dry run · `x` stop · `1-4` jump to pane · `b` switch backend · `a` add input · `d` delete input · `w` save case ·
 `n` save as new case · `q` quit
 
 ## Commands
@@ -184,5 +239,5 @@ Keys: `j/k` move · `tab` next pane · `enter` edit / load case · `r` run (noth
 - `hunch validate FLOW`: dangling routes, impossible branches, uncovered
   answers, unreachable nodes, loops, refs to nodes that haven't run yet.
 - `hunch tui FLOW [--backend name] [--set k=v]... [--state f.json]`
-- `hunch test FLOW [--backend name] [case...]`: run test cases, check expectations.
+- `hunch test FLOW [--backend name] [--live] [case...]`: run test cases, check expectations. `http` nodes don't send unless `--live`.
 - `hunch run FLOW [--backend name] [--case name] [--set k=v]... [--state f.json] [--trace f.jsonl] [--json] [--max-visits N]`

@@ -1,0 +1,8 @@
+description: Something is broken and costing them money
+input:
+  channel: email
+  message: Your API has been returning 500 errors for the last hour and we're losing orders. Please help.
+  post_url: https://example.com/replies
+expect:
+  needs_reply: yes
+  kind: problem

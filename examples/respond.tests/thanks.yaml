@@ -1,0 +1,8 @@
+description: Nothing to answer
+input:
+  channel: email
+  message: Thanks, that fixed it! All good now.
+  post_url: https://example.com/replies
+expect:
+  needs_reply: no
+  ignored.action: ignored
