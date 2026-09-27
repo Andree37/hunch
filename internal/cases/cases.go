@@ -23,6 +23,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/Andree37/hunch/internal/backend"
 	"github.com/Andree37/hunch/internal/flow"
 	"github.com/Andree37/hunch/internal/runner"
 	"github.com/Andree37/hunch/internal/tmpl"
@@ -281,6 +282,21 @@ func check(f *flow.Flow, state map[string]any, e Expectation) Result {
 		r.OK = ok
 	}
 	return r
+}
+
+// Matches reports whether a decision's answer satisfies an expectation:
+// yes/no for bool, the option for choice, a condition like ">=4" for score.
+func Matches(d backend.Decision, want string) bool {
+	switch d.Kind {
+	case flow.Bool:
+		yes, _ := d.Answer.(bool)
+		return (yes && normBool(want) == "yes") || (!yes && normBool(want) == "no")
+	case flow.Score:
+		v, _ := d.Answer.(float64)
+		ok, _ := flow.MatchScore(want, v)
+		return ok
+	}
+	return tmpl.Format(d.Answer) == want
 }
 
 func normBool(s string) string {

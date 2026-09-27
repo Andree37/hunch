@@ -218,3 +218,25 @@ func (r *RotatingFile) Close() error {
 	defer r.mu.Unlock()
 	return r.f.Close()
 }
+
+// ReadFiles reads a trace file together with the older files it rolled over
+// into (path.3, path.2, path.1), oldest first, as one stream.
+func ReadFiles(path string) ([]*Run, error) {
+	var readers []io.Reader
+	for i := 3; i >= 1; i-- {
+		if f, err := os.Open(fmt.Sprintf("%s.%d", path, i)); err == nil {
+			defer f.Close()
+			readers = append(readers, f)
+		}
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	runs, err := Read(io.MultiReader(append(readers, f)...))
+	if err != nil {
+		return runs, fmt.Errorf("%s: %w", path, err)
+	}
+	return runs, nil
+}

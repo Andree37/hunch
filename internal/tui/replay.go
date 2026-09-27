@@ -3,7 +3,6 @@ package tui
 import (
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"slices"
@@ -29,28 +28,14 @@ func (m *Model) SetRuns(path string) error {
 	return nil
 }
 
-// loadRuns reads the runs file together with the older files it rolled
-// over into (path.3, path.2, path.1), oldest first, as one stream.
 func (m *Model) loadRuns() error {
 	st, err := os.Stat(m.runsPath)
 	if err != nil {
 		return err
 	}
-	var readers []io.Reader
-	for i := 3; i >= 1; i-- {
-		if f, err := os.Open(fmt.Sprintf("%s.%d", m.runsPath, i)); err == nil {
-			defer f.Close()
-			readers = append(readers, f)
-		}
-	}
-	f, err := os.Open(m.runsPath)
+	runs, err := trace.ReadFiles(m.runsPath)
 	if err != nil {
 		return err
-	}
-	defer f.Close()
-	runs, err := trace.Read(io.MultiReader(append(readers, f)...))
-	if err != nil {
-		return fmt.Errorf("%s: %w", m.runsPath, err)
 	}
 	slices.Reverse(runs) // newest first
 	m.runs, m.runsMod = runs, st.ModTime()

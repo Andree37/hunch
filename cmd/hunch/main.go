@@ -30,6 +30,7 @@ usage:
   hunch tui FLOW [--backend name] [--set key=value]... [--state file.json] [--runs file.jsonl]
   hunch run FLOW [--backend name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl] [--json] [--dry-run]
   hunch test FLOW [--backend name] [--live] [name...]
+  hunch tune FLOW [--runs file.jsonl] [--backend name] [--no-tests] [--all]
   hunch serve FLOW [--addr 127.0.0.1:8080] [--backend name] [--dry-run] [--token-env VAR] [--trace file.jsonl]
              [--dedupe-key '{{record.id}}'] [--dedupe-file seen.jsonl] [--max-concurrent 4]
              [--timeout 5m] [--trace-max-mb 100]
@@ -66,6 +67,8 @@ func main() {
 		err = cmdTest(ctx, os.Args[2:])
 	case "serve":
 		err = cmdServe(ctx, os.Args[2:])
+	case "tune":
+		err = cmdTune(ctx, os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return
