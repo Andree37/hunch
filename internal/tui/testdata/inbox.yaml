@@ -1,0 +1,69 @@
+# Fixed copy of the example flow for TUI tests; the example may change.
+name: inbox-reply
+
+backends:
+  default: mock
+  mock:
+    kind: mock
+    seed: demo
+  jev:
+    kind: jev
+    provider: typesafe     # or openrouter, with $OPENROUTER_API_KEY
+
+nodes:
+  worth_it:
+    bool: "Does this message from {{sender}} need a response from me? Message: {{message}}"
+    then:
+      yes: intent
+      no: archive
+      unsure: ask_me
+
+  intent:
+    choice: "What does the sender want?"
+    options:
+      meeting: "They want to meet or call"
+      info: "They want an answer or some information"
+      favor: "They want me to do something for them"
+      sales: "They are selling something"
+    then:
+      sales: archive
+      _: tone
+
+  tone:
+    questions:
+      urgency:
+        score: "How urgent is this?"
+        scale: 1-5
+      formal:
+        bool: "Should the reply be formal?"
+    then: effort
+
+  effort:
+    score: "How much effort will replying take? Urgency is {{tone.urgency.level}}."
+    levels:
+      - "One line"
+      - "A short paragraph"
+      - "Needs some thought"
+      - "Needs research or other people"
+      - "A project in itself"
+    then:
+      "<=2.5": quick_reply
+      _: schedule
+
+  quick_reply:
+    action: log
+    message: "Reply now: {{intent.answer}}, urgency {{tone.urgency.level}}, formal={{tone.formal.answer}}"
+
+  schedule:
+    action: shell
+    # refs are shell-quoted for you, so keep them outside quotes
+    run: >-
+      echo Block time to answer {{sender}}: {{message}}
+
+  archive:
+    action: log
+    message: "Archived."
+
+  ask_me:
+    action: log
+    message: "Not sure about this one (confidence {{worth_it.confidence}}). Take a look yourself."
