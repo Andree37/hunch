@@ -98,9 +98,12 @@ func Run(ctx context.Context, f *flow.Flow, initial map[string]any, opts Options
 		ev := Event{Step: step, Node: n.ID, Kind: n.Kind}
 		start := time.Now()
 		var err error
-		if n.Kind.IsDecision() {
+		switch {
+		case n.Kind.IsDecision():
 			err = decideNode(ctx, f, n, res.State, opts, &ev)
-		} else {
+		case n.Kind == flow.Switch:
+			err = switchNode(n, res.State, &ev)
+		default:
 			err = actionNode(ctx, f, n, res.State, opts, &ev)
 		}
 		ev.Latency = time.Since(start)
@@ -251,6 +254,27 @@ func route(n *flow.Node, d backend.Decision, threshold float64) (branch, next st
 		return flow.Default, to, nil
 	}
 	return "", "", fmt.Errorf("no route for answer %s", tmpl.Format(d.Answer))
+}
+
+// switchNode routes on a rendered value: the branch named after it, else _.
+func switchNode(n *flow.Node, state map[string]any, ev *Event) error {
+	v, err := tmpl.Render(n.Switch, state)
+	if err != nil {
+		return err
+	}
+	ev.Output = map[string]any{"value": v}
+	r := n.Then
+	if len(r.Branches) == 0 {
+		ev.Next = r.Next
+		return nil
+	}
+	for _, key := range []string{v, flow.Default} {
+		if to, ok := r.Get(key); ok {
+			ev.Branch, ev.Next = key, to
+			return nil
+		}
+	}
+	return fmt.Errorf("no route for value %q", v)
 }
 
 func actionNode(ctx context.Context, f *flow.Flow, n *flow.Node, state map[string]any, opts Options, ev *Event) error {

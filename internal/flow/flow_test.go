@@ -59,19 +59,21 @@ func TestParse(t *testing.T) {
 
 func TestParseErrors(t *testing.T) {
 	cases := map[string]string{
-		"two kinds":       "nodes: {n: {bool: x, choice: y, options: [a, b]}}",
-		"no kind":         "nodes: {n: {then: m}}",
-		"unknown field":   "nodes: {n: {bool: x, colour: red}}",
-		"one option":      "nodes: {n: {choice: x, options: [a]}}",
-		"bad scale":       "nodes: {n: {score: x, scale: five}}",
-		"unknown action":  "nodes: {n: {action: email}}",
-		"unknown top":     "nodez: {}",
-		"scale on bool":   "nodes: {n: {bool: x, scale: 1-5}}",
-		"run on bool":     "nodes: {n: {bool: x, run: ls}}",
-		"options on log":  "nodes: {n: {action: log, message: m, options: [a, b]}}",
-		"levels vs scale": "nodes: {n: {score: x, scale: 1-5, levels: [a, b]}}",
-		"bad criteria":    "nodes: {n: {bool: x, criteria: {maybe: m}}}",
-		"typo in multi":   "nodes: {n: {questions: {a: {bool: x, optoins: [a, b]}}}}",
+		"two kinds":         "nodes: {n: {bool: x, choice: y, options: [a, b]}}",
+		"no kind":           "nodes: {n: {then: m}}",
+		"unknown field":     "nodes: {n: {bool: x, colour: red}}",
+		"one option":        "nodes: {n: {choice: x, options: [a]}}",
+		"bad scale":         "nodes: {n: {score: x, scale: five}}",
+		"unknown action":    "nodes: {n: {action: email}}",
+		"unknown top":       "nodez: {}",
+		"scale on bool":     "nodes: {n: {bool: x, scale: 1-5}}",
+		"run on bool":       "nodes: {n: {bool: x, run: ls}}",
+		"options on log":    "nodes: {n: {action: log, message: m, options: [a, b]}}",
+		"levels vs scale":   "nodes: {n: {score: x, scale: 1-5, levels: [a, b]}}",
+		"bad criteria":      "nodes: {n: {bool: x, criteria: {maybe: m}}}",
+		"empty switch":      "nodes: {n: {switch: \"\"}}",
+		"options on switch": "nodes: {n: {switch: x, options: [a, b]}}",
+		"typo in multi":     "nodes: {n: {questions: {a: {bool: x, optoins: [a, b]}}}}",
 	}
 	for name, src := range cases {
 		if _, err := Parse([]byte(src)); err == nil {

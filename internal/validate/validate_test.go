@@ -57,6 +57,8 @@ func TestIssues(t *testing.T) {
 		{"unused answer", `nodes: {a: {bool: q}}`, Warning, "never used"},
 		{"llm on jev", `{backends: {default: j, j: {kind: jev}}, nodes: {a: {action: llm, prompt: p}}}`, Error, `backend "j" (jev) can't write text`},
 		{"llm unknown writer", `{backends: {writer: w, m: {kind: mock}}, nodes: {a: {action: llm, prompt: p}}}`, Error, `backend "w" is not defined`},
+		{"switch unsure", `nodes: {a: {switch: "{{x}}", then: {unsure: a, _: a}}}`, Error, "never unsure"},
+		{"switch no default", `nodes: {a: {switch: "{{x}}", then: {v: a}}}`, Warning, "any other value stops the run"},
 		{"unused input", `{inputs: {x: [a, b]}, nodes: {a: {action: log, message: m}}}`, Warning, `input "x" is declared but no node uses it`},
 		{"ref to later node", `nodes: {a: {bool: "{{b.answer}}?", then: b}, b: {action: log, message: m}}`, Error, "never runs before"},
 	}

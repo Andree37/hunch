@@ -176,3 +176,25 @@ func TestBeforeCanPauseAndStop(t *testing.T) {
 		t.Errorf("seen = %v, path = %v", seen, res.Path)
 	}
 }
+
+func TestSwitch(t *testing.T) {
+	src := `
+nodes:
+  scope: {switch: "{{ticket.severity}}", then: {sev2: in, sev2.5: in, _: out}}
+  in: {action: output, set: {scope: in}}
+  out: {action: output, set: {scope: out}}
+`
+	for sev, want := range map[string]string{"sev2": "in", "sev2.5": "in", "sev1": "out"} {
+		res, err := runFlow(t, src, map[string]any{"ticket": map[string]any{"severity": sev}}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Outputs["scope"] != want {
+			t.Errorf("%s: scope = %v, want %s", sev, res.Outputs["scope"], want)
+		}
+	}
+	_, err := runFlow(t, `nodes: {s: {switch: "{{x}}", then: {a: s}}}`, map[string]any{"x": "b"}, false)
+	if err == nil || !strings.Contains(err.Error(), `no route for value "b"`) {
+		t.Errorf("err = %v", err)
+	}
+}

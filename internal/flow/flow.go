@@ -22,6 +22,7 @@ const (
 	Score     Kind = "score"
 	Questions Kind = "questions"
 	Action    Kind = "action"
+	Switch    Kind = "switch" // rule: route on a value, no model involved
 )
 
 // IsDecision reports whether nodes of this kind are answered by a backend.
@@ -141,6 +142,7 @@ type Node struct {
 	Kind      Kind
 	Questions []Question // one for bool/choice/score, several for questions
 	Action    *ActionSpec
+	Switch    string // template whose value picks the branch
 	Backend   string
 	Threshold float64 // 0 means use the flow's threshold
 	Then      Routes
@@ -154,6 +156,9 @@ func (n *Node) Texts() []string {
 	var out []string
 	for _, q := range n.Questions {
 		out = append(out, q.Text)
+	}
+	if n.Switch != "" {
+		out = append(out, n.Switch)
 	}
 	if a := n.Action; a != nil {
 		out = append(out, a.Message, a.Run, a.Prompt, a.System, a.URL)
@@ -383,7 +388,7 @@ func parseNodes(f *Flow, n *yaml.Node) error {
 
 var (
 	questionKeys = set("bool", "choice", "score", "options", "scale", "levels", "criteria")
-	nodeKeys     = set(append([]string{"bool", "choice", "score", "questions", "action",
+	nodeKeys     = set(append([]string{"bool", "choice", "score", "questions", "action", "switch",
 		"options", "scale", "levels", "criteria", "backend", "threshold", "then"}, actionOnly...)...)
 )
 
@@ -398,13 +403,13 @@ func parseNode(id string, n *yaml.Node) (*Node, error) {
 		}
 	}
 
-	kind, err := oneKind(fields, Bool, Choice, Score, Questions, Action)
+	kind, err := oneKind(fields, Bool, Choice, Score, Questions, Action, Switch)
 	if err != nil {
 		return nil, errAt(n, "node %q: %v", id, err)
 	}
 	node := &Node{ID: id, Kind: kind, Src: n}
 	for _, k := range []string{"options", "scale", "levels", "criteria"} {
-		if fields[k] != nil && (kind == Questions || kind == Action) {
+		if fields[k] != nil && (kind == Questions || kind == Action || kind == Switch) {
 			return nil, errAt(fields[k], "node %q: %s nodes don't take %s", id, kind, k)
 		}
 	}
@@ -450,6 +455,11 @@ func parseNode(id string, n *yaml.Node) (*Node, error) {
 				return nil, errAt(qfields[name], "node %q: question %q: %v", id, name, err)
 			}
 			node.Questions = append(node.Questions, q)
+		}
+	case Switch:
+		node.Switch = fields["switch"].Value
+		if node.Switch == "" {
+			return nil, errAt(n, "node %q: switch needs a value to route on, e.g. \"{{ticket.severity}}\"", id)
 		}
 	case Action:
 		a, err := parseAction(id, n, fields)

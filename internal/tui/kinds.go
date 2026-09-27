@@ -20,6 +20,7 @@ var (
 	blue   = lipgloss.Color("#74B9FF")
 	violet = lipgloss.Color("#9B8CFF")
 	white  = lipgloss.Color("#DDD6FE")
+	slate  = lipgloss.Color("#A0AEC0")
 
 	sInk  = lipgloss.NewStyle().Foreground(lipgloss.Color("#1A202C")).Bold(true)
 	sSlot = lipgloss.NewStyle().Foreground(lilac).Italic(true)
@@ -35,6 +36,8 @@ func kindStyle(n *flow.Node) (label string, c lipgloss.Color) {
 		return "SCORE", orange
 	case flow.Questions:
 		return "MULTI", blue
+	case flow.Switch:
+		return "RULE", slate
 	}
 	switch n.Action.Type {
 	case flow.ActShell:
@@ -78,6 +81,13 @@ func nodeDetail(n *flow.Node, ev runner.Event, ran bool) string {
 		s = strings.Join(parts, sDim.Render(" · "))
 	case flow.Action:
 		s = actionView(n.Action, ev, ran)
+	case flow.Switch:
+		if ran {
+			out, _ := ev.Output.(map[string]any)
+			s = lipgloss.NewStyle().Foreground(slate).Bold(true).Render(tmpl.Format(out["value"]))
+		} else {
+			s = sDim.Render("on ") + slots(n.Switch)
+		}
 	}
 	if ran && ev.Branch == flow.Unsure {
 		s += sYellow.Render(" unsure")

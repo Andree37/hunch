@@ -239,6 +239,18 @@ func (m *Model) nodeLines(w int) []string {
 	if n.Kind == flow.Action {
 		return append(lines, m.actionLines(n, ev, ran, w)...)
 	}
+	if n.Kind == flow.Switch {
+		lines = append(lines, sDim.Render("rule: route on ")+slots(n.Switch), "")
+		if !ran {
+			return append(lines, sDim.Render("not run"))
+		}
+		out, _ := ev.Output.(map[string]any)
+		lines = append(lines, sBold.Render("value")+"  "+tmpl.Format(out["value"]))
+		if ev.Next != "" {
+			lines = append(lines, "", sGreen.Render(fmt.Sprintf("%s → %s", edgeLabel(ev.Branch), ev.Next)))
+		}
+		return lines
+	}
 
 	var prevEv runner.Event
 	var hasPrev bool

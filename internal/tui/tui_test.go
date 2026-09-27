@@ -392,3 +392,28 @@ nodes:
 		t.Error("L should switch to live")
 	}
 }
+
+func TestSwitchNode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f.yaml")
+	os.WriteFile(path, []byte(`nodes:
+  scope: {switch: "{{sev}}", then: {sev2: in, _: out}}
+  in: {action: output, set: {scope: in}}
+  out: {action: output, set: {scope: out}}
+`), 0o644)
+	m, err := New(path, map[string]any{"sev": "sev2"}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "RULE    scope  on ⟨sev⟩") {
+		t.Errorf("want rule node before run:\n%s", screen)
+	}
+	_, cmd := m.Update(press("r"))
+	drive(t, m, cmd)
+	screen := ansi.Strip(m.View())
+	for _, want := range []string{"RULE    scope  sev2", "sev2 ▶ ●  OUTPUT  in", "value  sev2", "sev2 ▶ → in"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("screen missing %q:\n%s", want, screen)
+		}
+	}
+}

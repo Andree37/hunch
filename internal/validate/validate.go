@@ -94,7 +94,7 @@ func (v *validator) node(n *flow.Node) {
 		if len(n.Then.Targets()) == 0 {
 			v.warnf(n.ID, "has no `then`, so its answer is never used")
 		}
-	} else if n.Action.Type == flow.ActLLM {
+	} else if n.Kind == flow.Action && n.Action.Type == flow.ActLLM {
 		name := v.f.BackendFor(n)
 		cfg, ok := v.f.Backends[name]
 		switch {
@@ -114,6 +114,13 @@ func (v *validator) node(n *flow.Node) {
 	switch n.Kind {
 	case flow.Questions, flow.Action:
 		v.errorf(n.ID, "%s nodes take a single target (then: node), not branches", n.Kind)
+	case flow.Switch:
+		if _, ok := n.Then.Get(flow.Unsure); ok {
+			v.errorf(n.ID, "switch nodes are rules, never unsure; use _ for everything else")
+		}
+		if _, ok := n.Then.Get(flow.Default); !ok {
+			v.warnf(n.ID, "no `_` route: any other value stops the run")
+		}
 	case flow.Bool:
 		v.branchKeys(n, func(k string) bool { return k == "yes" || k == "no" })
 		v.covered(n, "yes", "no")
