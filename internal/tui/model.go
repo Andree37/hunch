@@ -11,7 +11,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -612,7 +611,7 @@ func (m *Model) pausedRun() bool {
 }
 
 func (m *Model) resumable() bool {
-	return m.pausedRun() && reflect.DeepEqual(m.run.inputs, m.state())
+	return m.pausedRun() && sameInputs(m.run.inputs, m.state())
 }
 
 // step lets the paused run execute one node.

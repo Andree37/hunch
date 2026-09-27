@@ -259,6 +259,11 @@ hunch tui examples/respond.yaml --runs runs.jsonl        # look at what happened
 - `s` replays it one step at a time, exactly as it happened; `r` runs the same
   input again live, e.g. after changing the flow, to see if it now goes the
   way it should.
+- `n` saves it as a test case: its input, the http replies it got (as fakes,
+  so it runs offline) and every answer it gave as `expect:`. Fix the answers
+  it got wrong and the test fails until the flow gets them right. `n` does the
+  same after any finished run in the TUI; with no run of the current inputs on
+  screen it saves just the inputs.
 
 
 Each is a different shape of the same building blocks; none is special.

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Andree37/hunch/internal/backend"
+	"github.com/Andree37/hunch/internal/cases"
 	"github.com/Andree37/hunch/internal/flow"
 	"github.com/Andree37/hunch/internal/runner"
 	"github.com/Andree37/hunch/internal/trace"
@@ -114,17 +115,18 @@ nodes:
 	m.keyEditor.SetValue("ann-asks")
 	m.Update(press("enter"))
 
+	// The run on screen used these inputs, so its answer is kept too.
 	casePath := filepath.Join(dir, "f.tests", "ann-asks.yaml")
 	saved, err := os.ReadFile(casePath)
-	if err != nil || string(saved) != "input:\n  who: ann\n" {
+	if err != nil || !strings.Contains(string(saved), "input:\n  who: ann\nexpect:\n  a: yes\n") {
 		t.Fatalf("saved case = %q, %v", saved, err)
 	}
 	if m.active != 0 || m.dirty || !strings.Contains(ansi.Strip(m.View()), "Inputs · test ann-asks") {
 		t.Errorf("new case should be active: active=%d dirty=%v", m.active, m.dirty)
 	}
 
-	// Add an expectation by hand, as a user would; the TUI picks it up.
-	os.WriteFile(casePath, append(saved, "expect:\n  a: no\n"...), 0o644)
+	// Correct the expectation by hand, as a user would; the TUI picks it up.
+	os.WriteFile(casePath, []byte(strings.Replace(string(saved), "a: yes", "a: no", 1)), 0o644)
 	m.Update(tickMsg{})
 	m.focus = focusTests
 	if _, cmd = m.Update(press("enter")); cmd != nil {
@@ -524,5 +526,44 @@ func TestReplayShowsRecordedBackend(t *testing.T) {
 	m.Update(press("enter"))
 	if title := ansi.Strip(m.nodeTitle()); !strings.Contains(title, "worth_it · jev") {
 		t.Errorf("title = %q, want the recorded backend", title)
+	}
+}
+
+func TestSaveReplayedRunAsTest(t *testing.T) {
+	dir := t.TempDir()
+	flowPath := filepath.Join(dir, "inbox.yaml")
+	src, _ := os.ReadFile("testdata/inbox.yaml")
+	os.WriteFile(flowPath, src, 0o644)
+	runs := recordRuns(t, map[string]any{"sender": "carol", "message": "hi"})
+
+	m, err := New(flowPath, nil, "mock", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.SetRuns(runs)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 44})
+	m.Update(press("2"))
+	m.Update(press("enter"))
+	m.Update(press("n"))
+	m.keyEditor.SetValue("carol-says-hi")
+	m.Update(press("enter"))
+
+	saved, err := os.ReadFile(filepath.Join(dir, "inbox.tests", "carol-says-hi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"description: From run", "sender: carol", "expect:", "worth_it: yes", "intent: favor", "tone.urgency:", "effort:"} {
+		if !strings.Contains(string(saved), want) {
+			t.Errorf("saved case missing %q:\n%s", want, saved)
+		}
+	}
+	if !strings.Contains(m.flash, "expectations from the run") || m.active < 0 {
+		t.Errorf("flash=%q active=%d", m.flash, m.active)
+	}
+	// Re-running it live against the saved expectations passes.
+	_, cmd := m.Update(press("r"))
+	drive(t, m, cmd)
+	if rs := m.results["carol-says-hi"]; len(rs) == 0 || !cases.Passed(rs) {
+		t.Errorf("results = %+v", rs)
 	}
 }

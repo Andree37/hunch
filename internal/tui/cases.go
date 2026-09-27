@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -108,6 +110,22 @@ func (m *Model) updateCaseNameEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.editing = editNone
 		m.keyEditor.Blur()
+		if r := m.pinnableRun(); r != nil {
+			// A finished run of these inputs is on screen: keep what it did.
+			c := cases.FromRun(m.flow, m.state(), r.path, r.events)
+			c.Name, c.Path, c.Description = name, path, m.runDescription()
+			if err := c.Create(); err != nil {
+				m.flash = "save failed: " + err.Error()
+				return m, nil
+			}
+			m.loadCases()
+			m.active = slices.IndexFunc(m.cases, func(c *cases.Case) bool { return c.Name == name })
+			m.caseCursor, m.dirty = max(m.active, 0), false
+			r.caseIdx = m.active
+			m.checkRun()
+			m.flash = fmt.Sprintf("saved %s with %d expectations from the run; fix any it got wrong in %s", name, len(c.Expect), filepath.Base(path))
+			return m, nil
+		}
 		m.saveCase(&cases.Case{Name: name, Path: path})
 		m.active = slices.IndexFunc(m.cases, func(c *cases.Case) bool { return c.Name == name })
 		m.caseCursor = max(m.active, 0)
@@ -121,6 +139,30 @@ func (m *Model) updateCaseNameEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.keyEditor, cmd = m.keyEditor.Update(msg)
 	return m, cmd
+}
+
+// pinnableRun is the finished, successful run on screen if it ran exactly
+// the current inputs, so saving a test can keep its answers.
+func (m *Model) pinnableRun() *run {
+	r := m.run
+	if r == nil || !r.done || r.err != nil || m.flow == nil || !sameInputs(r.inputs, m.state()) {
+		return nil
+	}
+	return r
+}
+
+func (m *Model) runDescription() string {
+	if m.replay != nil {
+		return fmt.Sprintf("From run %s recorded %s", m.replay.ID, m.replay.Time.Local().Format("2006-01-02 15:04"))
+	}
+	return "From a run in the TUI on " + time.Now().Format("2006-01-02 15:04")
+}
+
+// sameInputs compares inputs by their JSON, so 101 and 101.0 match.
+func sameInputs(a, b map[string]any) bool {
+	x, err1 := json.Marshal(a)
+	y, err2 := json.Marshal(b)
+	return err1 == nil && err2 == nil && string(x) == string(y)
 }
 
 // checkRun scores the finished run against its test case's expectations.

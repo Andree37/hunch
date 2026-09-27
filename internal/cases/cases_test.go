@@ -1,12 +1,15 @@
 package cases
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Andree37/hunch/internal/backend"
 	"github.com/Andree37/hunch/internal/flow"
+	"github.com/Andree37/hunch/internal/runner"
 )
 
 func TestDir(t *testing.T) {
@@ -155,4 +158,81 @@ http:
 	if err := c.CheckFakes(f); err == nil || !strings.Contains(err.Error(), `"note", which isn't an http node`) {
 		t.Errorf("err = %v", err)
 	}
+}
+
+func TestFromRunRoundTrip(t *testing.T) {
+	f, err := flow.Parse([]byte(`
+backends: {m: {kind: mock, answers: {gate: yes, kind: b, multi.n: 4, multi.ok: no}}}
+nodes:
+  fetch: {action: http, method: GET, url: "{{base}}", then: gate}
+  gate: {bool: "q?", then: {yes: kind, no: done}}
+  kind: {choice: "which?", options: [a, b], then: multi}
+  multi:
+    questions:
+      n: {score: "how many?"}
+      ok: {bool: "ok?"}
+    then: done
+  done: {action: output, set: {action: filed, kind: "{{kind.answer}}"}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := backend.New(f.Backends["m"])
+	input := map[string]any{"base": "https://example.invalid", "who": "ann"}
+	res, err := runner.Run(context.Background(), f, input, runner.Options{
+		Backends: map[string]backend.Backend{"m": b},
+		Fake:     map[string]runner.FakeResponse{"fetch": {Status: 200, Body: map[string]any{"title": "T"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := recordEvents(t, f, input, b)
+
+	c := FromRun(f, input, res.Path, events)
+	c.Name, c.Path = "saved", filepath.Join(t.TempDir(), "f.tests", "saved.yaml")
+	if err := c.Create(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Create(); err == nil {
+		t.Error("Create must not overwrite")
+	}
+	back, err := Load(filepath.Dir(c.Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := back[0]
+	want := map[string]string{"gate": "yes", "kind": "b", "multi.n": "4", "multi.ok": "no", "done.action": "filed", "done.kind": "b"}
+	if len(got.Expect) != len(want) {
+		t.Errorf("expect = %+v", got.Expect)
+	}
+	for _, e := range got.Expect {
+		if want[e.Target] != e.Want {
+			t.Errorf("expect %s = %q, want %q", e.Target, e.Want, want[e.Target])
+		}
+	}
+	if got.HTTP["fetch"].Body.(map[string]any)["title"] != "T" || got.Input["who"] != "ann" {
+		t.Errorf("case = %+v", got)
+	}
+	// The saved case passes against the same flow, offline.
+	res2, err := runner.Run(context.Background(), f, got.Input, runner.Options{Backends: map[string]backend.Backend{"m": b}, Fake: got.HTTP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rs := got.Check(f, res2.State); !Passed(rs) {
+		t.Errorf("saved case fails: %+v", rs)
+	}
+}
+
+func recordEvents(t *testing.T, f *flow.Flow, input map[string]any, b backend.Backend) map[string]runner.Event {
+	t.Helper()
+	events := map[string]runner.Event{}
+	_, err := runner.Run(context.Background(), f, input, runner.Options{
+		Backends: map[string]backend.Backend{"m": b},
+		Fake:     map[string]runner.FakeResponse{"fetch": {Status: 200, Body: map[string]any{"title": "T"}}},
+		OnEvent:  func(ev runner.Event) { events[ev.Node] = ev },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return events
 }
