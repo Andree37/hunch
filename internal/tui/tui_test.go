@@ -630,3 +630,39 @@ func TestRunsFromADirectory(t *testing.T) {
 		t.Error("should not re-list again within 10s")
 	}
 }
+
+func TestReplayedActionsShowTheirResults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f.yaml")
+	os.WriteFile(path, []byte(`nodes:
+  post: {action: http, url: "https://example.invalid", then: done}
+  done: {action: output, set: {action: sent}}
+`), 0o644)
+	f, _ := flow.Load(path)
+	runsPath := filepath.Join(t.TempDir(), "runs.jsonl")
+	file, _ := os.Create(runsPath)
+	rec := trace.NewWriter(file)
+	rec.Start("r1", path, "mock", nil)
+	res, err := runner.Run(context.Background(), f, nil, runner.Options{
+		Fake:    map[string]runner.FakeResponse{"post": {Status: 201}},
+		OnEvent: func(ev runner.Event) { rec.Step("r1", ev) },
+	})
+	rec.End("r1", res, err)
+	file.Close()
+	// Make the http output look like a real (not faked) response.
+	data, _ := os.ReadFile(runsPath)
+	os.WriteFile(runsPath, []byte(strings.ReplaceAll(string(data), `"faked":true`, `"faked":false`)), 0o644)
+
+	m, _ := New(path, nil, "", false)
+	m.SetRuns(runsPath)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m.Update(press("2"))
+	m.Update(press("enter"))
+	m.Update(press("1"))
+	m.Update(press("v"))
+	screen := ansi.Strip(m.View())
+	for _, want := range []string{"HTTP    post         ✓ 201", "OUTPUT  done         action=sent"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("missing %q:\n%s", want, screen)
+		}
+	}
+}

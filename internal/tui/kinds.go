@@ -168,7 +168,7 @@ func actionView(a *flow.ActionSpec, ev runner.Event, ran bool) string {
 		if !ran {
 			return sDim.Render("$ ") + slots(a.Run)
 		}
-		code, _ := out["exit_code"].(int)
+		code := asInt(out["exit_code"])
 		result := firstLine(tmpl.Format(out["stdout"]))
 		if code != 0 {
 			return sRed.Render(fmt.Sprintf("exit %d ", code)) + result
@@ -189,7 +189,7 @@ func actionView(a *flow.ActionSpec, ev runner.Event, ran bool) string {
 		if out["faked"] == true {
 			return sYellow.Render(fmt.Sprintf("FAKED %v", out["status"])) + sDim.Render(" from the test case")
 		}
-		status, _ := out["status"].(int)
+		status := asInt(out["status"])
 		if status >= 300 {
 			return sRed.Render(fmt.Sprintf("✗ %d", status))
 		}
@@ -209,6 +209,18 @@ func actionView(a *flow.ActionSpec, ev runner.Event, ran bool) string {
 		return fmt.Sprintf("%q", tmpl.Format(out["message"]))
 	}
 	return slots(a.Message)
+}
+
+// asInt reads a number that may have been through JSON (a recorded run),
+// where every number comes back as float64.
+func asInt(v any) int {
+	switch x := v.(type) {
+	case int:
+		return x
+	case float64:
+		return int(x)
+	}
+	return 0
 }
 
 func firstLine(s string) string {

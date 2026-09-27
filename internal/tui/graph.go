@@ -185,6 +185,9 @@ func (m *Model) pathLines() (lines []string, rowLine []int) {
 		}
 		ev, ran := m.eventFor(id)
 		head := fmt.Sprintf("%s%2d %s %s %s", marker, i+1, m.statusIcon(id), badge(n), name)
+		if ran && n.Kind == flow.Action {
+			head += " " + nodeDetail(n, ev, true)
+		}
 		if ran && n.Kind != flow.Action {
 			detail := nodeDetail(n, ev, true)
 			// The story needs the answer, not every option it beat.
