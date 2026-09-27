@@ -1,0 +1,9 @@
+description: Cold outreach selling a product
+input:
+  channel: email
+  vip: false
+  sender: deals@saasbuddy.io
+  message: |-
+    Hi! Quick question - are you the right person to talk to about cutting your cloud bill by 40%? Happy to send a 2-min demo.
+expect:
+  worth_it: no

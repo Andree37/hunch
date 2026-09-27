@@ -1,0 +1,10 @@
+description: A friend asks for help moving
+input:
+  channel: sms
+  vip: false
+  sender: sam
+  message: |-
+    Hey! Any chance you could help me move a couch on Saturday morning? Pizza on me.
+expect:
+  worth_it: yes
+  intent: favor

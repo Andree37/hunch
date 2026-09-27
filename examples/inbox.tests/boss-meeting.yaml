@@ -1,0 +1,10 @@
+description: Boss wants to meet before the board meeting
+input:
+  channel: sms
+  vip: false
+  sender: boss
+  message: Can we sync Thursday about the launch? Need your numbers before the board meeting.
+expect:
+  worth_it: yes
+  intent: meeting
+  tone.urgency: ">=4"
