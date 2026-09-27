@@ -29,9 +29,12 @@ usage:
   hunch tui FLOW [--backend name] [--set key=value]... [--state file.json]
   hunch run FLOW [--backend name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl] [--json] [--dry-run]
   hunch test FLOW [--backend name] [--live] [name...]
+  hunch serve FLOW [--addr 127.0.0.1:8080] [--backend name] [--dry-run] [--token-env VAR] [--trace file.jsonl]
 
-http nodes send for real in run (unless --dry-run) and only record the
-request in test and the TUI (unless --live / L).
+http nodes that write send for real in run and serve (unless --dry-run) and
+only record the request in test and the TUI (unless --live / L).
+serve runs FLOW for every POST /: the JSON body is the input, the reply the
+path taken and the outputs.
 
 Test cases live in FLOW's sibling directory, e.g. inbox.yaml → inbox.tests/*.yaml.
 `
@@ -58,6 +61,8 @@ func main() {
 		err = cmdTUI(os.Args[2:])
 	case "test":
 		err = cmdTest(ctx, os.Args[2:])
+	case "serve":
+		err = cmdServe(ctx, os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return
@@ -196,7 +201,11 @@ func cmdTUI(args []string) error {
 	if err != nil {
 		return err
 	}
-	state, err := initialState(f, *stateFile, sets)
+	// Only the caller's input: the flow's own state is constants, added by
+	// the runner, not something to edit in the TUI.
+	inputs := *f
+	inputs.State = nil
+	state, err := initialState(&inputs, *stateFile, sets)
 	if err != nil {
 		return err
 	}
