@@ -24,6 +24,7 @@ type Options struct {
 	MaxSteps  int       // default 100
 	MaxVisits int       // per node, default 5
 	Stdout    io.Writer // shell action output
+	DryRun    bool      // http actions record their request instead of sending it
 	// Before is called before each node runs and may block, e.g. to step
 	// through a flow one node at a time. An error stops the run.
 	Before  func(ctx context.Context, node string) error
@@ -50,6 +51,7 @@ type Result struct {
 	State   map[string]any
 	Path    []string
 	CostUSD float64
+	Outputs map[string]any // everything output nodes set, later ones winning
 }
 
 func Run(ctx context.Context, f *flow.Flow, initial map[string]any, opts Options) (*Result, error) {
@@ -63,7 +65,7 @@ func Run(ctx context.Context, f *flow.Flow, initial map[string]any, opts Options
 		opts.Stdout = io.Discard
 	}
 
-	res := &Result{State: maps.Clone(initial)}
+	res := &Result{State: maps.Clone(initial), Outputs: map[string]any{}}
 	if res.State == nil {
 		res.State = map[string]any{}
 	}
@@ -99,7 +101,7 @@ func Run(ctx context.Context, f *flow.Flow, initial map[string]any, opts Options
 		if n.Kind.IsDecision() {
 			err = decideNode(ctx, f, n, res.State, opts, &ev)
 		} else {
-			err = actionNode(ctx, n, res.State, opts, &ev)
+			err = actionNode(ctx, f, n, res.State, opts, &ev)
 		}
 		ev.Latency = time.Since(start)
 		if err != nil {
@@ -108,6 +110,9 @@ func Run(ctx context.Context, f *flow.Flow, initial map[string]any, opts Options
 
 		res.State[n.ID] = ev.Output
 		res.CostUSD += ev.CostUSD
+		if n.Kind == flow.Action && n.Action.Type == flow.ActOutput {
+			maps.Copy(res.Outputs, ev.Output.(map[string]any))
+		}
 		if opts.OnEvent != nil {
 			opts.OnEvent(ev)
 		}
@@ -248,17 +253,29 @@ func route(n *flow.Node, d backend.Decision, threshold float64) (branch, next st
 	return "", "", fmt.Errorf("no route for answer %s", tmpl.Format(d.Answer))
 }
 
-func actionNode(ctx context.Context, n *flow.Node, state map[string]any, opts Options, ev *Event) error {
+func actionNode(ctx context.Context, f *flow.Flow, n *flow.Node, state map[string]any, opts Options, ev *Event) error {
 	ev.Next = n.Then.Next
 	a := n.Action
 	switch a.Type {
-	case "log":
+	case flow.ActLLM:
+		return llmNode(ctx, f, n, state, opts, ev)
+	case flow.ActHTTP:
+		return httpNode(ctx, n, state, opts, ev)
+	case flow.ActOutput:
+		return outputNode(n, state, ev)
+	case flow.ActLog:
 		msg, err := tmpl.Render(a.Message, state)
 		if err != nil {
 			return err
 		}
 		ev.Output = map[string]any{"message": msg}
-	case "shell":
+	case flow.ActShell:
+		timeout := 60 * time.Second
+		if a.Timeout > 0 {
+			timeout = time.Duration(a.Timeout * float64(time.Second))
+		}
+		ctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
 		// Every substituted value is escaped for the quoting it sits in, so
 		// state can't inject commands.
 		script, err := tmpl.RenderFunc(a.Run, state, func(v string, at int) string {
@@ -274,6 +291,9 @@ func actionNode(ctx context.Context, n *flow.Node, state map[string]any, opts Op
 		code := 0
 		if err := cmd.Run(); err != nil {
 			var exitErr *exec.ExitError
+			if ctx.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("shell command timed out after %s", timeout)
+			}
 			if !errors.As(err, &exitErr) {
 				return err
 			}

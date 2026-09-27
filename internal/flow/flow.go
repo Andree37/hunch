@@ -57,11 +57,52 @@ type Question struct {
 	Levels   []string
 }
 
+// Action types.
+const (
+	ActLog    = "log"    // print a message
+	ActShell  = "shell"  // run a command
+	ActLLM    = "llm"    // generate text with a writer backend
+	ActHTTP   = "http"   // call an API
+	ActOutput = "output" // record part of the flow's result
+)
+
 type ActionSpec struct {
-	Type    string // "log" or "shell"
+	Type    string
 	Message string // log
 	Run     string // shell
+
+	Prompt    string // llm
+	System    string // llm
+	MaxTokens int    // llm, 0 = backend default
+
+	Method  string // http, default POST
+	URL     string // http
+	Headers []KV   // http
+	Body    any    // http: a template string, or a map/list whose strings are templates
+
+	Set []KV // output
+
+	Timeout float64 // seconds, shell and http
 }
+
+// KV is one entry of an ordered map from the flow file. Value is a
+// template string unless the YAML gave a number or bool (then Literal).
+type KV struct {
+	Key     string
+	Value   string
+	Literal any
+}
+
+// actionFields lists the fields each action type accepts.
+var actionFields = map[string]map[string]bool{
+	ActLog:    set("message"),
+	ActShell:  set("run", "timeout"),
+	ActLLM:    set("prompt", "system", "max_tokens", "backend"),
+	ActHTTP:   set("method", "url", "headers", "body", "timeout"),
+	ActOutput: set("set"),
+}
+
+var actionOnly = []string{"message", "run", "prompt", "system", "max_tokens", "method", "url", "headers", "body", "set", "timeout"}
 
 type Branch struct{ When, To string }
 
@@ -115,9 +156,36 @@ func (n *Node) Texts() []string {
 		out = append(out, q.Text)
 	}
 	if a := n.Action; a != nil {
-		out = append(out, a.Message, a.Run)
+		out = append(out, a.Message, a.Run, a.Prompt, a.System, a.URL)
+		for _, h := range a.Headers {
+			out = append(out, h.Value)
+		}
+		for _, kv := range a.Set {
+			out = append(out, kv.Value)
+		}
+		out = append(out, bodyStrings(a.Body)...)
 	}
 	return out
+}
+
+func bodyStrings(v any) []string {
+	switch x := v.(type) {
+	case string:
+		return []string{x}
+	case map[string]any:
+		var out []string
+		for _, e := range x {
+			out = append(out, bodyStrings(e)...)
+		}
+		return out
+	case []any:
+		var out []string
+		for _, e := range x {
+			out = append(out, bodyStrings(e)...)
+		}
+		return out
+	}
+	return nil
 }
 
 // Inputs returns the values a run takes: declared inputs first, then any
@@ -156,6 +224,7 @@ type Flow struct {
 	DefaultBackend string
 	Backends       map[string]BackendConfig
 	State          map[string]any
+	WriterBackend  string      // default backend for llm nodes
 	InputSpecs     []InputSpec // declared inputs, in file order
 	Nodes          []*Node     // in file order
 
@@ -173,10 +242,14 @@ func (f *Flow) ThresholdFor(n *Node) float64 {
 	return f.Threshold
 }
 
-// BackendFor returns the name of the backend that answers n.
+// BackendFor returns the name of the backend that answers n, or for an
+// llm node, the one that writes its text.
 func (f *Flow) BackendFor(n *Node) string {
 	if n.Backend != "" {
 		return n.Backend
+	}
+	if n.Kind == Action && n.Action.Type == ActLLM && f.WriterBackend != "" {
+		return f.WriterBackend
 	}
 	return f.DefaultBackend
 }
@@ -270,8 +343,12 @@ func parseBackends(f *Flow, n *yaml.Node) error {
 	}
 	for _, name := range keys {
 		v := fields[name]
-		if name == "default" {
+		switch name {
+		case "default":
 			f.DefaultBackend = v.Value
+			continue
+		case "writer":
+			f.WriterBackend = v.Value
 			continue
 		}
 		var opts map[string]any
@@ -306,8 +383,8 @@ func parseNodes(f *Flow, n *yaml.Node) error {
 
 var (
 	questionKeys = set("bool", "choice", "score", "options", "scale", "levels", "criteria")
-	nodeKeys     = set("bool", "choice", "score", "questions", "action",
-		"options", "scale", "levels", "criteria", "message", "run", "backend", "threshold", "then")
+	nodeKeys     = set(append([]string{"bool", "choice", "score", "questions", "action",
+		"options", "scale", "levels", "criteria", "backend", "threshold", "then"}, actionOnly...)...)
 )
 
 func parseNode(id string, n *yaml.Node) (*Node, error) {
@@ -326,10 +403,16 @@ func parseNode(id string, n *yaml.Node) (*Node, error) {
 		return nil, errAt(n, "node %q: %v", id, err)
 	}
 	node := &Node{ID: id, Kind: kind, Src: n}
-	for _, k := range []string{"options", "scale", "levels", "criteria", "message", "run"} {
-		isActionField := k == "message" || k == "run"
-		if fields[k] != nil && (kind == Questions || isActionField != (kind == Action)) {
+	for _, k := range []string{"options", "scale", "levels", "criteria"} {
+		if fields[k] != nil && (kind == Questions || kind == Action) {
 			return nil, errAt(fields[k], "node %q: %s nodes don't take %s", id, kind, k)
+		}
+	}
+	if kind != Action {
+		for _, k := range actionOnly {
+			if fields[k] != nil {
+				return nil, errAt(fields[k], "node %q: %s nodes don't take %s", id, kind, k)
+			}
 		}
 	}
 
@@ -369,20 +452,9 @@ func parseNode(id string, n *yaml.Node) (*Node, error) {
 			node.Questions = append(node.Questions, q)
 		}
 	case Action:
-		a := &ActionSpec{Type: fields["action"].Value}
-		if m := fields["message"]; m != nil {
-			a.Message = m.Value
-		}
-		if r := fields["run"]; r != nil {
-			a.Run = r.Value
-		}
-		switch {
-		case a.Type == "log" && a.Message == "":
-			return nil, errAt(n, "node %q: log action needs a message", id)
-		case a.Type == "shell" && a.Run == "":
-			return nil, errAt(n, "node %q: shell action needs run", id)
-		case a.Type != "log" && a.Type != "shell":
-			return nil, errAt(n, "node %q: unknown action %q (want log or shell)", id, a.Type)
+		a, err := parseAction(id, n, fields)
+		if err != nil {
+			return nil, err
 		}
 		node.Action = a
 	}

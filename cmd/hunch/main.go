@@ -27,8 +27,11 @@ const usage = `hunch: decision flows with typed, calibrated answers
 usage:
   hunch validate FLOW
   hunch tui FLOW [--backend name] [--set key=value]... [--state file.json]
-  hunch run FLOW [--backend name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl] [--json]
-  hunch test FLOW [--backend name] [name...]
+  hunch run FLOW [--backend name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl] [--json] [--dry-run]
+  hunch test FLOW [--backend name] [--live] [name...]
+
+http nodes send for real in run (unless --dry-run) and only record the
+request in test and the TUI (unless --live / L).
 
 Test cases live in FLOW's sibling directory, e.g. inbox.yaml → inbox.tests/*.yaml.
 `
@@ -91,6 +94,7 @@ func cmdRun(ctx context.Context, args []string) error {
 	maxVisits := fs.Int("max-visits", 5, "max times a single node may run")
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
 	caseName := fs.String("case", "", "take input from this test case (--set still overrides)")
+	dryRun := fs.Bool("dry-run", false, "don't send http requests; record them instead")
 	path, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -152,6 +156,7 @@ func cmdRun(ctx context.Context, args []string) error {
 	res, err := runner.Run(ctx, f, state, runner.Options{
 		Backends:  backends,
 		MaxVisits: *maxVisits,
+		DryRun:    *dryRun,
 		Stdout:    progress,
 		OnEvent: func(ev runner.Event) {
 			printEvent(progress, ev)
@@ -165,6 +170,7 @@ func cmdRun(ctx context.Context, args []string) error {
 	}
 
 	fmt.Fprintf(progress, "\n✓ done · %d steps · $%.6f · %s\n", len(res.Path), res.CostUSD, strings.Join(res.Path, " → "))
+	printOutputs(progress, res.Outputs)
 	if c != nil && len(c.Expect) > 0 {
 		printResults(progress, c.Check(f, res.State))
 	}
@@ -206,6 +212,7 @@ func cmdTUI(args []string) error {
 func cmdTest(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("test", flag.ExitOnError)
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
+	live := fs.Bool("live", false, "send http requests for real (default: record them only)")
 	var paths []string
 	for {
 		if err := fs.Parse(args); err != nil {
@@ -263,7 +270,7 @@ func cmdTest(ctx context.Context, args []string) error {
 			fmt.Printf("✗ %s: %v\n", c.Name, err)
 			continue
 		}
-		res, err := runner.Run(ctx, f, state, runner.Options{Backends: backends})
+		res, err := runner.Run(ctx, f, state, runner.Options{Backends: backends, DryRun: !*live})
 		cost += res.CostUSD
 		switch {
 		case err != nil:
@@ -325,6 +332,16 @@ func checkInputs(f *flow.Flow, state map[string]any) error {
 		}
 	}
 	return nil
+}
+
+func printOutputs(w io.Writer, outputs map[string]any) {
+	if len(outputs) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "outputs:")
+	for _, k := range slices.Sorted(maps.Keys(outputs)) {
+		fmt.Fprintf(w, "    %s: %s\n", k, tmpl.Format(outputs[k]))
+	}
 }
 
 func findCase(flowPath, name string) (*cases.Case, error) {
@@ -413,12 +430,27 @@ func printEvent(w io.Writer, ev runner.Event) {
 		d := ev.Decisions[0]
 		detail = fmt.Sprintf("%s  conf %.2f", answer(d), d.Confidence)
 	default:
-		if out, ok := ev.Output.(map[string]any); ok {
-			if msg, ok := out["message"]; ok {
-				detail = fmt.Sprintf("%q", msg)
-			} else if code := out["exit_code"]; code != 0 {
+		out, _ := ev.Output.(map[string]any)
+		switch {
+		case out["message"] != nil:
+			detail = fmt.Sprintf("%q", out["message"])
+		case out["text"] != nil:
+			first, _, _ := strings.Cut(tmpl.Format(out["text"]), "\n")
+			detail = fmt.Sprintf("wrote %q", first)
+		case out["dry_run"] == true:
+			detail = fmt.Sprintf("dry run: %v %v", out["method"], out["url"])
+		case out["status"] != nil:
+			detail = fmt.Sprintf("HTTP %v", out["status"])
+		case out["exit_code"] != nil:
+			if code := out["exit_code"]; code != 0 {
 				detail = fmt.Sprintf("exit %v", code)
 			}
+		default:
+			parts := make([]string, 0, len(out))
+			for _, k := range slices.Sorted(maps.Keys(out)) {
+				parts = append(parts, k+"="+tmpl.Format(out[k]))
+			}
+			detail = strings.Join(parts, " ")
 		}
 	}
 	if ev.Branch == flow.Unsure {

@@ -167,8 +167,23 @@ func check(f *flow.Flow, state map[string]any, e Expectation) Result {
 	r := Result{Expectation: e}
 	nodeID, qname, multi := strings.Cut(e.Target, ".")
 	n := f.Node(nodeID)
-	if n == nil || !n.Kind.IsDecision() {
-		r.Got = "not a decision node"
+	if n == nil {
+		r.Got = "no such node"
+		return r
+	}
+	// Actions: compare a named field of what they produced, e.g. result.action.
+	if n.Kind == flow.Action {
+		if !multi {
+			r.Got = "name a field, e.g. " + nodeID + ".text"
+			return r
+		}
+		v, ok := tmpl.Lookup(state, e.Target)
+		if !ok {
+			r.Got = "didn't run"
+			return r
+		}
+		r.Got = tmpl.Format(v)
+		r.OK = r.Got == e.Want
 		return r
 	}
 	q := n.Questions[0]

@@ -89,23 +89,26 @@ nodes:
     then: size
   size: {score: q}
   never: {bool: q}
+  result: {action: output, set: {action: x}}
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
 	state := map[string]any{
-		"gate":  map[string]any{"answer": true},
-		"kind":  map[string]any{"answer": "b"},
-		"multi": map[string]any{"u": map[string]any{"answer": 4.4}},
-		"size":  map[string]any{"answer": 2.0},
+		"gate":   map[string]any{"answer": true},
+		"kind":   map[string]any{"answer": "b"},
+		"multi":  map[string]any{"u": map[string]any{"answer": 4.4}},
+		"size":   map[string]any{"answer": 2.0},
+		"result": map[string]any{"action": "send", "n": 2},
 	}
 	c := &Case{Expect: []Expectation{
 		{"gate", "yes"}, {"kind", "a"}, {"multi.u", ">=4"}, {"size", "2"},
 		{"never", "no"}, {"nope", "x"}, {"multi.zz", "1"},
+		{"result.action", "send"}, {"result.n", "3"}, {"result", "x"},
 	}}
 	rs := c.Check(f, state)
-	wantOK := []bool{true, false, true, true, false, false, false}
-	wantGot := []string{"yes", "b", "4.40", "2.00", "didn't run", "not a decision node", "no such question"}
+	wantOK := []bool{true, false, true, true, false, false, false, true, false, false}
+	wantGot := []string{"yes", "b", "4.40", "2.00", "didn't run", "no such node", "no such question", "send", "2", "name a field, e.g. result.text"}
 	for i, r := range rs {
 		if r.OK != wantOK[i] || r.Got != wantGot[i] {
 			t.Errorf("%s: ok=%v got=%q; want ok=%v got=%q", r.Target, r.OK, r.Got, wantOK[i], wantGot[i])

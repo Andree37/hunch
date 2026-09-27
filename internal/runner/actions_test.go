@@ -1,0 +1,136 @@
+package runner
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/Andree37/hunch/internal/backend"
+	"github.com/Andree37/hunch/internal/flow"
+)
+
+func runFlow(t *testing.T, src string, state map[string]any, dry bool) (*Result, error) {
+	t.Helper()
+	f, err := flow.Parse([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	backends := map[string]backend.Backend{}
+	for name, cfg := range f.Backends {
+		b, err := backend.New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		backends[name] = b
+	}
+	return Run(context.Background(), f, state, Options{Backends: backends, DryRun: dry})
+}
+
+func TestLLMAndOutput(t *testing.T) {
+	res, err := runFlow(t, `
+backends: {m: {kind: mock, answers: {ok: yes}}}
+nodes:
+  draft: {action: llm, prompt: "Reply to {{who}}", then: ok}
+  ok: {bool: "Good enough? {{draft.text}}", then: {yes: send, no: hold}}
+  send: {action: output, set: {action: send, text: "{{draft.text}}", n: "{{count}}", fixed: 2}}
+  hold: {action: output, set: {action: hold}}
+`, map[string]any{"who": "ann", "count": 3.0}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := res.State["draft"].(map[string]any)["text"].(string)
+	if !strings.Contains(text, "Reply to ann") {
+		t.Errorf("draft text = %q", text)
+	}
+	want := map[string]any{"action": "send", "text": text, "n": 3.0, "fixed": 2}
+	for k, v := range want {
+		if res.Outputs[k] != v {
+			t.Errorf("output %s = %#v, want %#v", k, res.Outputs[k], v)
+		}
+	}
+}
+
+func TestLLMNeedsAWriter(t *testing.T) {
+	_, err := runFlow(t, `
+backends: {j: {kind: jev}}
+nodes: {draft: {action: llm, prompt: hi}}
+`, nil, false)
+	if err == nil || !strings.Contains(err.Error(), "can't write text") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestHTTPLive(t *testing.T) {
+	var gotPath, gotQuery, gotAuth string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery, gotAuth = r.URL.EscapedPath(), r.URL.RawQuery, r.Header.Get("Authorization")
+		data, _ := io.ReadAll(r.Body)
+		json.Unmarshal(data, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id": 7}`)
+	}))
+	defer srv.Close()
+	t.Setenv("HUNCH_TEST_TOKEN", "secret")
+
+	res, err := runFlow(t, `
+nodes:
+  post:
+    action: http
+    url: "{{base}}/items/{{name}}?q={{q}}"
+    headers: {Authorization: "Bearer $HUNCH_TEST_TOKEN"}
+    body: {name: "{{name}}", count: "{{n}}", tags: [a, "{{q}}"]}
+`, map[string]any{"base": srv.URL, "name": "a b/c", "q": "x&y", "n": 2.0}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/items/a%20b%2Fc" || gotQuery != "q=x%26y" || gotAuth != "Bearer secret" {
+		t.Errorf("request path=%q query=%q auth=%q", gotPath, gotQuery, gotAuth)
+	}
+	if gotBody["name"] != "a b/c" || gotBody["count"] != 2.0 || gotBody["tags"].([]any)[1] != "x&y" {
+		t.Errorf("body = %v", gotBody)
+	}
+	out := res.State["post"].(map[string]any)
+	if out["status"] != 200 || out["body"].(map[string]any)["id"] != 7.0 {
+		t.Errorf("output = %v", out)
+	}
+}
+
+func TestHTTPDryRunSendsNothing(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	defer srv.Close()
+	res, err := runFlow(t, `nodes: {post: {action: http, url: "{{base}}/x", body: "hi {{who}}"}}`,
+		map[string]any{"base": srv.URL, "who": "ann"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := res.State["post"].(map[string]any)
+	if called || out["dry_run"] != true || out["body"] != "hi ann" || out["method"] != "POST" {
+		t.Errorf("dry run: called=%v output=%v", called, out)
+	}
+}
+
+func TestHTTPErrorStopsRun(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		io.WriteString(w, "boom")
+	}))
+	defer srv.Close()
+	res, err := runFlow(t, `nodes: {post: {action: http, url: "{{base}}", then: after}, after: {action: log, message: no}}`,
+		map[string]any{"base": srv.URL}, false)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 500: boom") || len(res.Path) != 1 {
+		t.Errorf("err = %v, path = %v", err, res.Path)
+	}
+}
+
+func TestShellTimeout(t *testing.T) {
+	_, err := runFlow(t, `nodes: {slow: {action: shell, run: "sleep 5", timeout: 0.2}}`, nil, false)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("err = %v", err)
+	}
+}

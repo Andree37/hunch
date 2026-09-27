@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/Andree37/hunch/internal/backend"
 	"github.com/Andree37/hunch/internal/flow"
 	"github.com/Andree37/hunch/internal/tmpl"
 )
@@ -93,8 +94,17 @@ func (v *validator) node(n *flow.Node) {
 		if len(n.Then.Targets()) == 0 {
 			v.warnf(n.ID, "has no `then`, so its answer is never used")
 		}
-	} else if n.Backend != "" {
-		v.warnf(n.ID, "backend is ignored on action nodes")
+	} else if n.Action.Type == flow.ActLLM {
+		name := v.f.BackendFor(n)
+		cfg, ok := v.f.Backends[name]
+		switch {
+		case name == "":
+			v.errorf(n.ID, "no backend to write with (set backends.writer or backend on the node)")
+		case !ok:
+			v.errorf(n.ID, "backend %q is not defined", name)
+		case !backend.CanWrite(cfg.Kind):
+			v.errorf(n.ID, "backend %q (%s) can't write text; use openai, anthropic, bedrock or mock", name, cfg.Kind)
+		}
 	}
 
 	r := n.Then

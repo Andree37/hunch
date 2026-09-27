@@ -55,6 +55,8 @@ func TestIssues(t *testing.T) {
 		{"loop", `nodes: {a: {bool: q, then: {yes: a, no: b}}, b: {action: log, message: m}}`, Warning, "loops back"},
 		{"unknown backend", `nodes: {a: {bool: q, backend: jev, then: a}}`, Error, `backend "jev" is not defined`},
 		{"unused answer", `nodes: {a: {bool: q}}`, Warning, "never used"},
+		{"llm on jev", `{backends: {default: j, j: {kind: jev}}, nodes: {a: {action: llm, prompt: p}}}`, Error, `backend "j" (jev) can't write text`},
+		{"llm unknown writer", `{backends: {writer: w, m: {kind: mock}}, nodes: {a: {action: llm, prompt: p}}}`, Error, `backend "w" is not defined`},
 		{"unused input", `{inputs: {x: [a, b]}, nodes: {a: {action: log, message: m}}}`, Warning, `input "x" is declared but no node uses it`},
 		{"ref to later node", `nodes: {a: {bool: "{{b.answer}}?", then: b}, b: {action: log, message: m}}`, Error, "never runs before"},
 	}
