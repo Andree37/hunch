@@ -10,7 +10,8 @@
 #
 #   examples/ticketdesk/demo.sh
 #
-# Then open the recorded runs:  go run ./cmd/hunch tui examples/triage.yaml --runs .demo/runs
+# Then open the recorded runs:  go run ./cmd/hunch tui examples/triage.yaml
+# (runs are recorded next to the flow, in examples/triage.runs/)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -23,7 +24,7 @@ go build -o .demo/hunch ./cmd/hunch
 go build -o .demo/ticketdesk ./examples/ticketdesk
 
 .demo/hunch serve examples/triage.yaml --addr 127.0.0.1:8080 --token-env HOOK_TOKEN \
-  --dedupe-key '{{ticket_id}}' --dedupe-store .demo/dedupe --trace .demo/runs 2>.demo/hunch.log &
+  --dedupe-key '{{ticket_id}}' --dedupe-store .demo/dedupe 2>.demo/hunch.log &
 HUNCH=$!
 .demo/ticketdesk --addr 127.0.0.1:8090 --webhook http://127.0.0.1:8080/ --token-env HOOK_TOKEN 2>.demo/desk.log &
 DESK=$!
@@ -55,4 +56,4 @@ for t in json.load(sys.stdin):
         print("    comment: " + c["body"])
 '
 echo
-echo "logs: .demo/hunch.log .demo/desk.log · replay: go run ./cmd/hunch tui examples/triage.yaml --runs .demo/runs"
+echo "logs: .demo/hunch.log .demo/desk.log · replay: go run ./cmd/hunch tui examples/triage.yaml"

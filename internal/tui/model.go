@@ -52,6 +52,7 @@ const (
 	editValue
 	editCaseName // naming a new test case
 	editPick     // choosing from a choice or bool input's options
+	editRunsPath // typing where to read runs from
 )
 
 // run is one execution of the flow, as seen so far.
@@ -140,6 +141,7 @@ func New(path string, state map[string]any, backendName string, fromCase bool) (
 	if err := m.loadCases(); err != nil {
 		return nil, err
 	}
+	m.useFlowRuns()
 	if fromCase && len(m.cases) > 0 {
 		m.useCase(0)
 	}
@@ -331,6 +333,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateCaseNameEditor(msg)
 		case editPick:
 			return m.updatePicker(msg)
+		case editRunsPath:
+			return m.updateRunsPathEditor(msg)
 		}
 		return m.updateKeys(msg)
 	}
@@ -455,6 +459,11 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "t":
 		if m.runsPath != "" {
 			m.showRuns = !m.showRuns
+		}
+	case "o":
+		if m.focus == focusTests {
+			m.showRuns = true
+			return m, m.openRunsPrompt()
 		}
 	case "a":
 		m.focus = focusInputs

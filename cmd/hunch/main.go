@@ -100,7 +100,7 @@ func cmdRun(ctx context.Context, args []string) error {
 	var sets multiFlag
 	fs.Var(&sets, "set", "set a state field, key=value (repeatable; values parse as JSON when they can)")
 	stateFile := fs.String("state", "", "JSON file with initial state")
-	traceFile := fs.String("trace", "", "record the run: a .jsonl file, a directory or s3://bucket/prefix")
+	traceFile := fs.String("trace", "", "where to record the run: a .jsonl file, a directory, s3://bucket/prefix, or off (default: the flow's runs location)")
 	asJSON := fs.Bool("json", false, "print final state as JSON on stdout; progress goes to stderr")
 	maxVisits := fs.Int("max-visits", 5, "max times a single node may run")
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
@@ -152,8 +152,8 @@ func cmdRun(ctx context.Context, args []string) error {
 	}
 
 	var rec *trace.Writer
-	if *traceFile != "" {
-		w, closer, err := trace.Open(ctx, *traceFile, 100<<20)
+	if loc := recordTo(*traceFile, f); loc != "" {
+		w, closer, err := trace.Open(ctx, loc, 100<<20)
 		if err != nil {
 			return err
 		}
@@ -201,7 +201,7 @@ func cmdTUI(args []string) error {
 	stateFile := fs.String("state", "", "JSON file with initial state")
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
 	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
-	runsFile := fs.String("runs", "", "recorded runs to list and replay: a .jsonl file, a directory or s3://bucket/prefix")
+	runsFile := fs.String("runs", "", "read recorded runs from here instead of the flow's runs location: a .jsonl file, a directory or s3://bucket/prefix")
 	path, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -378,6 +378,18 @@ func checkInputs(f *flow.Flow, state map[string]any) error {
 		}
 	}
 	return nil
+}
+
+// recordTo picks where runs are recorded: --trace if given ("off" for
+// nowhere), else the flow's runs location.
+func recordTo(flag string, f *flow.Flow) string {
+	switch flag {
+	case "off":
+		return ""
+	case "":
+		return f.RunsLocation()
+	}
+	return flag
 }
 
 func caseInput(c *cases.Case) map[string]any {

@@ -34,7 +34,7 @@ func cmdServe(ctx context.Context, args []string) error {
 	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
 	dryRun := fs.Bool("dry-run", false, "don't send http requests that write; record them instead")
 	tokenEnv := fs.String("token-env", "", "require `Authorization: Bearer <token>` with the token read from this env var")
-	traceFile := fs.String("trace", "", "record every run: a .jsonl file, a directory or s3://bucket/prefix")
+	traceFile := fs.String("trace", "", "where to record runs: a .jsonl file, a directory, s3://bucket/prefix, or off (default: the flow's runs location)")
 	timeout := fs.Duration("timeout", 5*time.Minute, "longest a single run may take")
 	dedupeKey := fs.String("dedupe-key", "", "template naming a run from its input, e.g. '{{record.id}}'; repeats of a finished run get its reply without running again")
 	dedupeTTL := fs.Duration("dedupe-ttl", 24*time.Hour, "how long a finished run's reply is remembered for duplicates")
@@ -76,14 +76,15 @@ func cmdServe(ctx context.Context, args []string) error {
 		}
 	}
 	var rec *trace.Writer
-	if *traceFile != "" {
-		w, closer, err := trace.Open(ctx, *traceFile, int64(*traceMaxMB)<<20)
+	if loc := recordTo(*traceFile, h.flow); loc != "" {
+		w, closer, err := trace.Open(ctx, loc, int64(*traceMaxMB)<<20)
 		if err != nil {
 			return err
 		}
 		defer closer.Close()
 		w.OnError = func(err error) { log.Print(err) }
 		rec = w
+		log.Printf("recording runs to %s", loc)
 	}
 
 	h.token, h.trace = token, rec

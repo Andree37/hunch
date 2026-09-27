@@ -717,3 +717,49 @@ func TestRunOfOlderVersionIsMarked(t *testing.T) {
 		t.Errorf("want older-version note:\n%s", screen)
 	}
 }
+
+func TestFlowRunsLoadWithoutFlags(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	src, _ := os.ReadFile("testdata/inbox.yaml")
+	os.WriteFile(path, src, 0o644)
+
+	// Nothing recorded yet: no runs, and reading doesn't create the folder.
+	m, err := New(path, nil, "mock", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.showRuns || m.runsPath != filepath.Join(dir, "f.runs") {
+		t.Errorf("runsPath=%q showRuns=%v", m.runsPath, m.showRuns)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "f.runs")); !os.IsNotExist(err) {
+		t.Error("reading runs must not create the folder")
+	}
+
+	// Runs recorded into the flow's runs folder show up on their own.
+	f, _ := flow.Load(path)
+	b, _ := backend.New(f.Backends["mock"])
+	w, _, _ := trace.Open(context.Background(), f.RunsLocation(), 0)
+	w.Start("r1", path, "mock", map[string]any{"sender": "ann", "message": "hi"})
+	res, rerr := runner.Run(context.Background(), f, map[string]any{"sender": "ann", "message": "hi"},
+		runner.Options{Backends: map[string]backend.Backend{"mock": b}, OnEvent: func(ev runner.Event) { w.Step("r1", ev) }})
+	w.End("r1", res, rerr)
+	m2, _ := New(path, nil, "mock", false)
+	if !m2.showRuns || len(m2.runs) != 1 {
+		t.Errorf("want the flow's run listed: showRuns=%v runs=%d", m2.showRuns, len(m2.runs))
+	}
+
+	// o opens another place from inside the TUI.
+	other := recordRunsFor(t, path, map[string]any{"sender": "bob", "message": "x"}, map[string]any{"sender": "cy", "message": "y"})
+	m2.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m2.Update(press("2"))
+	m2.Update(press("o"))
+	if m2.editing != editRunsPath {
+		t.Fatal("o should prompt for a location")
+	}
+	m2.keyEditor.SetValue(other)
+	m2.Update(press("enter"))
+	if m2.runsPath != other || len(m2.runs) != 2 || m2.editing != editNone {
+		t.Errorf("after o: path=%q runs=%d", m2.runsPath, len(m2.runs))
+	}
+}

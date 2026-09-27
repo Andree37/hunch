@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -286,7 +287,11 @@ func (r *RotatingFile) Close() error {
 // objects.
 func ReadAll(ctx context.Context, loc string) ([]*Run, error) {
 	if !store.IsRemote(loc) {
-		if st, err := os.Stat(loc); err == nil && !st.IsDir() {
+		st, err := os.Stat(loc)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil // nothing recorded yet
+		}
+		if err == nil && !st.IsDir() {
 			return ReadFiles(loc)
 		}
 	}

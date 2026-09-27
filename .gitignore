@@ -33,3 +33,6 @@ go.work.sum
 
 # local demo output
 .demo/
+
+# recorded runs (hunch serve/run record next to each flow)
+*.runs/

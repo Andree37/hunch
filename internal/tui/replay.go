@@ -31,6 +31,56 @@ func (m *Model) SetRuns(path string) error {
 	return nil
 }
 
+// useFlowRuns reads the runs from the flow's own runs location, if it has
+// one, and shows them when there are any.
+func (m *Model) useFlowRuns() {
+	loc := m.flow.RunsLocation()
+	if loc == "" {
+		return
+	}
+	m.runsPath = loc
+	if err := m.loadRuns(); err != nil {
+		m.flash = "runs: " + err.Error()
+		return
+	}
+	m.showRuns = len(m.runs) > 0
+}
+
+// openRunsPrompt asks for another place to read runs from.
+func (m *Model) openRunsPrompt() tea.Cmd {
+	m.editing = editRunsPath
+	m.keyEditor.Prompt = "runs from (folder, .jsonl or s3://…): "
+	m.keyEditor.SetValue(m.runsPath)
+	m.keyEditor.CursorEnd()
+	return m.keyEditor.Focus()
+}
+
+func (m *Model) updateRunsPathEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.editing = editNone
+		m.keyEditor.Blur()
+		return m, nil
+	case "enter":
+		loc := strings.TrimSpace(m.keyEditor.Value())
+		if loc == "" {
+			return m, nil
+		}
+		if err := m.SetRuns(loc); err != nil {
+			m.flash = "can't read runs: " + err.Error()
+			return m, nil
+		}
+		m.editing = editNone
+		m.keyEditor.Blur()
+		m.runCursor = 0
+		m.flash = fmt.Sprintf("%d run(s) of this flow in %s", len(m.runs), loc)
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.keyEditor, cmd = m.keyEditor.Update(msg)
+	return m, cmd
+}
+
 func (m *Model) loadRuns() error {
 	runs, err := trace.ReadAll(context.Background(), m.runsPath)
 	if err != nil {

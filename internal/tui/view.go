@@ -607,6 +607,9 @@ func (m *Model) pane2Title() string {
 }
 
 func (m *Model) pane2Lines(w, h int) []string {
+	if m.editing == editRunsPath {
+		return append([]string{m.keyEditor.View(), ""}, m.runLines(w, h-2)...)
+	}
 	if m.showRuns {
 		return m.runLines(w, h)
 	}
@@ -691,7 +694,7 @@ func (m *Model) statusBar() string {
 		left = " x stop · 1-4 panes"
 	case m.pausedRun():
 		left = " s step · r run to end · x stop · 1-4 panes"
-	case m.editing == editKey || m.editing == editCaseName:
+	case m.editing == editKey || m.editing == editCaseName || m.editing == editRunsPath:
 		left = " enter ok · esc cancel"
 	case m.editing == editPick:
 		left = " j/k choose · enter select · esc cancel"
@@ -700,7 +703,7 @@ func (m *Model) statusBar() string {
 	case m.focus == focusInputs:
 		left = " j/k move · enter edit · a add · d delete · w save test · n save as new test · r run · tab next"
 	case m.focus == focusTests:
-		left = " j/k move · enter load · r run · s step · 1-4 panes · q quit"
+		left = " j/k move · enter open · t tests/runs · o open runs from… · r run · 1-4 panes · q quit"
 	case m.focus == focusNode:
 		left = " j/k scroll · r run · s step · 1-4 panes · q quit"
 	default:

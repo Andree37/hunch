@@ -6,6 +6,7 @@ package flow
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -249,6 +250,7 @@ type Flow struct {
 	Backends       map[string]BackendConfig
 	State          map[string]any
 	WriterBackend  string      // default backend for llm nodes
+	Runs           string      // where runs are recorded, as written in the file (see RunsLocation)
 	InputSpecs     []InputSpec // declared inputs, in file order
 	Nodes          []*Node     // in file order
 
@@ -276,6 +278,23 @@ func (f *Flow) BackendFor(n *Node) string {
 		return f.WriterBackend
 	}
 	return f.DefaultBackend
+}
+
+// RunsLocation is where this flow's runs are recorded and read from: its
+// `runs:` (s3://..., or a path relative to the flow file), else <flow>.runs
+// next to the flow file, like its tests. Empty for `runs: off`.
+func (f *Flow) RunsLocation() string {
+	switch {
+	case f.Runs == "off":
+		return ""
+	case strings.HasPrefix(f.Runs, "s3://") || filepath.IsAbs(f.Runs):
+		return f.Runs
+	case f.Runs != "":
+		return filepath.Join(filepath.Dir(f.Path), f.Runs)
+	case f.Path != "":
+		return strings.TrimSuffix(f.Path, filepath.Ext(f.Path)) + ".runs"
+	}
+	return ""
 }
 
 func Load(path string) (*Flow, error) {
@@ -316,6 +335,8 @@ func Parse(data []byte) (*Flow, error) {
 		switch k {
 		case "name":
 			f.Name = v.Value
+		case "runs":
+			f.Runs = v.Value
 		case "start":
 			f.Start = v.Value
 		case "threshold":

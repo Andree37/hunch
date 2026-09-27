@@ -144,3 +144,23 @@ func TestMatchScore(t *testing.T) {
 		t.Error("expected error for bad condition")
 	}
 }
+
+func TestRunsLocation(t *testing.T) {
+	cases := []struct{ runs, want string }{
+		{"", "examples/triage.runs"},
+		{"history", "examples/history"},
+		{"s3://bucket/triage/", "s3://bucket/triage/"},
+		{"/var/hunch/runs", "/var/hunch/runs"},
+		{"off", ""},
+	}
+	for _, c := range cases {
+		f := &Flow{Path: "examples/triage.yaml", Runs: c.runs}
+		if got := f.RunsLocation(); got != c.want {
+			t.Errorf("runs %q: got %q, want %q", c.runs, got, c.want)
+		}
+	}
+	f, err := Parse([]byte("runs: history\nnodes: {a: {action: log, message: m}}"))
+	if err != nil || f.Runs != "history" {
+		t.Errorf("parse runs: %v %q", err, f.Runs)
+	}
+}

@@ -255,9 +255,13 @@ curl -H "Authorization: Bearer $HOOK_TOKEN" \
 
 ## Recording and replaying runs
 
-`--trace` on `hunch run` or `hunch serve` records every run: its input, each
-step (question as asked, what the model saw, probabilities, route, cost), and
-how it ended. It goes where you point it:
+`hunch run` and `hunch serve` record every run: its input, each step
+(question as asked, what the model saw, probabilities, route, cost), and how
+it ended. By default runs go next to the flow, like its tests:
+`examples/triage.yaml` → `examples/triage.runs/`. Set `runs:` in the flow to
+record elsewhere (a path relative to the flow file, or `s3://bucket/prefix`),
+`runs: off` to not record, or `--trace` to override it for one command.
+A location can be:
 
 | `--trace` | Stored as |
 |---|---|
@@ -266,14 +270,17 @@ how it ended. It goes where you point it:
 | `s3://bucket/runs/` | the same, as S3 objects (credentials and region from the usual AWS chain; `?region=` overrides) |
 
 One object per run means several serve tasks never write over each other.
-Open the recordings in the TUI from any of the three:
+The TUI reads the flow's runs by itself:
 
 ```sh
-hunch serve examples/respond.yaml --trace s3://my-bucket/runs/   # production
-hunch tui examples/respond.yaml --runs s3://my-bucket/runs/      # look at what happened
+hunch serve examples/triage.yaml     # records to examples/triage.runs/
+hunch tui examples/triage.yaml       # lists and replays them
 ```
 
-- Pane 2 lists the recorded runs, newest first (`t` switches to test cases);
+- Pane 2 lists the flow's recorded runs, newest first (`t` switches to test
+  cases). Only runs of the open flow are listed; runs of other flows in the
+  same place are hidden, with the command to open them. `o` reads runs from
+  somewhere else (a folder, a `.jsonl` file or `s3://…`), as does `--runs`;
   it updates while serve keeps recording (a file on change; a directory or
   S3 every 10s, in the background).
 - Enter loads a run into the graph and path views, with its input in pane 4.
@@ -343,7 +350,8 @@ It creates six tickets and prints what happened to each:
 #6 [sev1 · network] Whole Lisbon office has no internet   (sev1: left to people)
 ```
 
-Replay any of them step by step: `go run ./cmd/hunch tui examples/triage.yaml --runs .demo/runs`.
+Replay any of them step by step: `go run ./cmd/hunch tui examples/triage.yaml`
+(the runs are recorded in `examples/triage.runs/`).
 
 The 12 test cases in `examples/triage.tests/` cover ownership and severity,
 including both readings of "my computer is down":
