@@ -1,0 +1,12 @@
+description: MFA codes on a new phone (identity team)
+input: {ticket_id: 109}
+http:
+  fetch:
+    body:
+      severity: sev2.5
+      title: MFA codes not arriving on my new phone
+      description: I switched phones and the authenticator app has no codes for my work account, so I can't complete sign-in.
+      request: Please reset my MFA.
+expect:
+  owner: identity
+  to_identity.team: identity

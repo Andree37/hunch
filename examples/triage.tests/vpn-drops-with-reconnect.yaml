@@ -1,0 +1,13 @@
+description: VPN drops for some remote staff but reconnecting works (degraded, filed too high)
+input: {ticket_id: 104}
+http:
+  fetch:
+    body:
+      severity: sev2
+      title: VPN keeps dropping
+      description: Several people in the remote sales team get disconnected from the VPN about once an hour. Reconnecting works straight away.
+      request: Please make the VPN stable.
+expect:
+  owner: network
+  from_sev2: sev2.5
+  lower_from_sev2.to: sev2.5

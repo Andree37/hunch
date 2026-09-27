@@ -1,0 +1,12 @@
+description: The whole office is offline (sev1, left to people)
+input: {ticket_id: 107}
+http:
+  fetch:
+    body:
+      severity: sev1
+      title: Whole Lisbon office has no internet
+      description: Nobody in the Lisbon office can reach the internet or the VPN since 08:30.
+      request: Urgent, the office is down.
+expect:
+  owner: network
+  out_of_scope.action: skipped

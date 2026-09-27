@@ -1,0 +1,13 @@
+description: '"My computer is down" but it is on; it just has no internet (ours, one person, workaround)'
+input: {ticket_id: 101}
+http:
+  fetch:
+    body:
+      severity: sev2
+      title: My computer is down
+      description: My laptop is on and works, but it has had no internet since this morning. The cable is plugged in and colleagues next to me are fine. I'm working from my phone's hotspot for now.
+      request: Please get my laptop back online.
+expect:
+  owner: network
+  from_sev2: sev3
+  lower_from_sev2.to: sev3

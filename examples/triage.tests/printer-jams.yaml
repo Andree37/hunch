@@ -1,0 +1,12 @@
+description: A printer fault (desktop team)
+input: {ticket_id: 111}
+http:
+  fetch:
+    body:
+      severity: sev2.5
+      title: Printer jams on every page
+      description: The printer by the kitchen jams on every single page. It's reachable and receives the jobs fine.
+      request: Please fix or replace it.
+expect:
+  owner: desktop
+  to_desktop.team: desktop

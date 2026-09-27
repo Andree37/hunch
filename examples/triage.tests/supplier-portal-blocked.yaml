@@ -1,0 +1,15 @@
+description: >-
+  A site blocked by the company proxy for a team, with an email workaround.
+  Ours and sev2.5, but borderline (a whole team is affected), so Jev is
+  sometimes below the 0.7 threshold and hands it to a person, which is fine.
+input: {ticket_id: 106}
+http:
+  fetch:
+    body:
+      severity: sev2.5
+      title: Supplier portal blocked by proxy
+      description: The purchasing team can't open supplier.example.com; the browser says it's blocked by the company proxy. We can still send orders by email in the meantime.
+      request: Please allow the supplier portal through the proxy.
+expect:
+  owner: network
+  from_sev2_5: sev2.5

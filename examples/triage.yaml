@@ -1,0 +1,261 @@
+# Triage for a network team: when a ticket arrives, decide whether it is
+# ours at all (reroute it to the right team if not), then check its severity
+# against our SLA and lower it if it's filed too high, saying why on the
+# ticket. It never raises a severity, and only sev2 and sev2.5 are checked.
+#
+# Triggered by a webhook when a ticket is created; the webhook only sends the
+# id, and the flow fetches the ticket itself:
+#
+#   export TICKETS_API=http://127.0.0.1:8090 TICKETS_TOKEN=... HOOK_TOKEN=...
+#   hunch serve examples/triage.yaml --token-env HOOK_TOKEN --dedupe-key '{{ticket_id}}'
+#
+# Try it end to end with the toy ticket system: examples/ticketdesk/demo.sh
+# The test cases fake the fetch and never write: hunch test examples/triage.yaml
+name: network-triage
+
+backends:
+  default: jev        # decides: whose ticket, which severity, the facts, the note check
+  writer: local
+  jev: {kind: jev, provider: typesafe}
+  # Models on this machine via Ollama (ollama pull qwen2.5:1.5b).
+  local: {kind: openai, base_url: "http://localhost:11434/v1", model: "qwen2.5:0.5b"}
+  notes: {kind: openai, base_url: "http://localhost:11434/v1", model: "qwen2.5:1.5b"}
+  mock: {kind: mock, seed: demo}
+
+state:
+  # What each team handles. Written once, used by the ownership question and
+  # in the note a rerouted ticket gets.
+  teams:
+    network: >-
+      Us. Internet connectivity: no internet, Wi-Fi, wired network, VPN, DNS,
+      the office connection, network drops, and websites or services blocked
+      by the firewall or proxy.
+    desktop: >-
+      The computer itself: it won't turn on or crashes, broken screen,
+      keyboard or other hardware, the operating system, installing software,
+      and printers.
+    identity: >-
+      Passwords, accounts, multi-factor authentication and access
+      permissions.
+    applications: >-
+      Business applications (CRM, finance, HR tools) that are reachable but
+      behave wrongly, show wrong data, or need a how-to answer.
+
+  # Our SLA, for network issues only.
+  sla:
+    sev1: A whole site or most users have no internet or VPN.
+    sev2: A team, or someone in a critical role, has no connectivity at all, with no workaround.
+    sev2.5: Connectivity is degraded or intermittent for some users, or a workaround exists.
+    sev3: One user's problem that has a workaround, a question, or a request for access or setup.
+
+inputs:
+  ticket_id: {type: number, description: The id the webhook sends}
+
+nodes:
+  fetch:
+    action: http
+    method: GET
+    url: "$TICKETS_API/tickets/{{ticket_id}}"
+    headers: {Authorization: "Bearer $TICKETS_TOKEN"}
+    then: owner
+
+  # First: is this ours at all? "My computer is down" is ours only if the
+  # problem is its connection.
+  owner:
+    choice: |-
+      Which team should handle this ticket?
+      Title: {{fetch.body.title}}
+      Description: {{fetch.body.description}}
+      Request: {{fetch.body.request}}
+    options:
+      network: "{{teams.network}}"
+      desktop: "{{teams.desktop}}"
+      identity: "{{teams.identity}}"
+      applications: "{{teams.applications}}"
+    sees: [fetch.body.title, fetch.body.description, fetch.body.request, teams]
+    threshold: 0.7
+    then:
+      network: scope
+      desktop: to_desktop
+      identity: to_identity
+      applications: to_applications
+      unsure: for_human
+
+  to_desktop:
+    action: output
+    set: {action: rerouted, team: desktop, handles: "{{teams.desktop}}"}
+    then: reroute
+
+  to_identity:
+    action: output
+    set: {action: rerouted, team: identity, handles: "{{teams.identity}}"}
+    then: reroute
+
+  to_applications:
+    action: output
+    set: {action: rerouted, team: applications, handles: "{{teams.applications}}"}
+    then: reroute
+
+  reroute:
+    action: http
+    method: PATCH
+    url: "$TICKETS_API/tickets/{{ticket_id}}"
+    headers: {Authorization: "Bearer $TICKETS_TOKEN"}
+    body: {team: "{{outputs.team}}"}
+    idempotency_key: "reroute-{{ticket_id}}"
+    then: reroute_note
+
+  reroute_note:
+    action: http
+    method: POST
+    url: "$TICKETS_API/tickets/{{ticket_id}}/comments"
+    headers: {Authorization: "Bearer $TICKETS_TOKEN"}
+    body: {body: "Routed to the {{outputs.team}} team, which handles: {{outputs.handles}} The network team only handles connectivity."}
+    idempotency_key: "reroute-note-{{ticket_id}}"
+
+  # Ours: is the severity right? A rule, not a model: only these two are checked.
+  scope:
+    switch: "{{fetch.body.severity}}"
+    then:
+      sev2: from_sev2
+      sev2.5: from_sev2_5
+      _: out_of_scope
+
+  # Each starting severity may only stay or go down, so nothing can be raised.
+  from_sev2:
+    choice: |-
+      Under our SLA, which severity does this network ticket really have? It was filed as sev2.
+      Title: {{fetch.body.title}}
+      Description: {{fetch.body.description}}
+      Request: {{fetch.body.request}}
+    options:
+      sev2: "{{sla.sev2}}"
+      sev2.5: "{{sla.sev2.5}}"
+      sev3: "{{sla.sev3}}"
+    sees: [fetch.body.title, fetch.body.description, fetch.body.request, sla]
+    threshold: 0.7
+    then: {sev2: within_sla, unsure: for_human, _: lower_from_sev2}
+
+  from_sev2_5:
+    choice: |-
+      Under our SLA, which severity does this network ticket really have? It was filed as sev2.5.
+      Title: {{fetch.body.title}}
+      Description: {{fetch.body.description}}
+      Request: {{fetch.body.request}}
+    options:
+      sev2.5: "{{sla.sev2.5}}"
+      sev3: "{{sla.sev3}}"
+    sees: [fetch.body.title, fetch.body.description, fetch.body.request, sla]
+    threshold: 0.7
+    then: {sev2.5: within_sla, unsure: for_human, _: lower_from_sev2_5}
+
+  lower_from_sev2:
+    action: output
+    set: {action: lowered, from: sev2, to: "{{from_sev2.answer}}", confidence: "{{from_sev2.confidence}}"}
+    then: facts
+
+  lower_from_sev2_5:
+    action: output
+    set: {action: lowered, from: sev2.5, to: "{{from_sev2_5.answer}}", confidence: "{{from_sev2_5.confidence}}"}
+    then: facts
+
+  # Establish, against the SLA, the facts the note should rest on. The note
+  # model then only has to phrase them.
+  facts:
+    questions:
+      no_connection:
+        bool: "Is there no connection at all (no internet or VPN)?"
+        criteria: {yes: "They can't connect at all", no: "It connects, maybe slowly or on and off"}
+      workaround:
+        bool: "Is there a workaround?"
+        criteria: {yes: "They can still get online another way (cable, hotspot, another network)", no: "No way around it"}
+      reach:
+        choice: "How many people are affected?"
+        options: {one: "Only the person who filed it", some: "A few people or a team", many: "A whole office or most users"}
+      kind:
+        choice: "What kind of ticket is this?"
+        options:
+          outage: "Connectivity is down"
+          degraded: "Slow or dropping connection"
+          question: "Asking how to do something"
+          request: "Asking for access or setup"
+    sees: [fetch.body.title, fetch.body.description, fetch.body.request]
+    then: explain
+
+  explain:
+    action: llm
+    backend: notes
+    system: >-
+      You write one short internal note for a support ticket explaining a
+      severity change. Use only the facts given. Do not answer the customer,
+      give instructions or apologise.
+    prompt: |-
+      Our SLA:
+      - sev2: {{sla.sev2}}
+      - sev2.5: {{sla.sev2.5}}
+      - sev3: {{sla.sev3}}
+
+      Ticket: {{fetch.body.title}}
+      Decision: moved from {{outputs.from}} to {{outputs.to}}.
+
+      Facts:
+      - No connection at all: {{facts.no_connection.answer}}
+      - Workaround exists: {{facts.workaround.answer}}
+      - People affected: {{facts.reach.answer}}
+      - Kind of ticket: {{facts.kind.answer}}
+
+      Write one or two sentences for the ticket saying why it is {{outputs.to}}
+      and not {{outputs.from}}, citing the facts that match the SLA.
+    then: note_ok
+
+  # The note model may be small: check its note before it goes on the
+  # ticket, and fall back to a plain one if it's off.
+  note_ok:
+    bool: |-
+      Is this a correct note explaining why a ticket moved from {{outputs.from}}
+      to {{outputs.to}}, without answering the customer or adding anything untrue?
+      Note: {{explain.text}}
+    sees: [fetch.body.title, fetch.body.description, outputs, facts, sla]
+    criteria:
+      yes: It explains the move to the right severity and stays on that
+      no: It names the wrong severity, answers the customer, or says something the ticket doesn't
+    then: {yes: use_note, no: plain_note, unsure: plain_note}
+
+  use_note:
+    action: output
+    set: {note: "{{explain.text}}"}
+    then: update
+
+  plain_note:
+    action: output
+    set: {note: "Severity moved from {{outputs.from}} to {{outputs.to}} under our SLA. Kind: {{facts.kind.answer}} · no connection at all: {{facts.no_connection.answer}} · workaround: {{facts.workaround.answer}} · people affected: {{facts.reach.answer}}."}
+    then: update
+
+  update:
+    action: http
+    method: PATCH
+    url: "$TICKETS_API/tickets/{{ticket_id}}"
+    headers: {Authorization: "Bearer $TICKETS_TOKEN"}
+    body: {severity: "{{outputs.to}}"}
+    idempotency_key: "severity-{{ticket_id}}"
+    then: comment
+
+  comment:
+    action: http
+    method: POST
+    url: "$TICKETS_API/tickets/{{ticket_id}}/comments"
+    headers: {Authorization: "Bearer $TICKETS_TOKEN"}
+    body: {body: "{{outputs.note}}"}
+    idempotency_key: "severity-note-{{ticket_id}}"
+
+  within_sla:
+    action: output
+    set: {action: kept}
+
+  for_human:
+    action: output
+    set: {action: needs_human, reason: "the call was too close to make automatically"}
+
+  out_of_scope:
+    action: output
+    set: {action: skipped, reason: "only sev2 and sev2.5 network tickets are checked"}

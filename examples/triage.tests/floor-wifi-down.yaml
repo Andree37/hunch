@@ -1,0 +1,13 @@
+description: A whole floor has no Wi-Fi and no wired ports (a genuine sev2)
+input: {ticket_id: 103}
+http:
+  fetch:
+    body:
+      severity: sev2
+      title: No Wi-Fi on the 3rd floor
+      description: Since 10:00 nobody on the 3rd floor can connect to Wi-Fi. That's about 40 people in finance. There are no wired ports up here.
+      request: Please restore the Wi-Fi, finance can't work.
+expect:
+  owner: network
+  from_sev2: sev2
+  within_sla.action: kept

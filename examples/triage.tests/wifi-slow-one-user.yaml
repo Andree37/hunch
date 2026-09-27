@@ -1,0 +1,13 @@
+description: One person with slow Wi-Fi who can plug in a cable (sev3)
+input: {ticket_id: 112}
+http:
+  fetch:
+    body:
+      severity: sev2
+      title: Wi-Fi very slow at my desk
+      description: My Wi-Fi is really slow at my desk; pages take ages. When I plug in the network cable it's fast.
+      request: Could you look at the Wi-Fi near desk 42?
+expect:
+  owner: network
+  from_sev2: sev3
+  lower_from_sev2.to: sev3

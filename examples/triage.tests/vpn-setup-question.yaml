@@ -1,0 +1,13 @@
+description: How to set up the VPN on a new laptop (a question, sev3)
+input: {ticket_id: 105}
+http:
+  fetch:
+    body:
+      severity: sev2.5
+      title: How do I set up the VPN on my new laptop?
+      description: I got a new laptop and don't know how to install and configure the VPN client. I can still use my old laptop meanwhile.
+      request: Can you send me the setup steps?
+expect:
+  owner: network
+  from_sev2_5: sev3
+  lower_from_sev2_5.to: sev3

@@ -294,7 +294,7 @@ automatically, how many go to `unsure`, and how many would be confident but
 wrong.
 
 ```sh
-hunch tune examples/severity.yaml --runs runs.jsonl --backend jev
+hunch tune examples/triage.yaml --runs runs.jsonl
 ```
 
 - Recorded runs (`--runs`) are real traffic but don't say what's right; test
@@ -306,38 +306,50 @@ hunch tune examples/severity.yaml --runs runs.jsonl --backend jev
 
 ## Try it for real, locally
 
-`examples/ticketdesk` is a toy ticket system that sends a webhook when a
-ticket is created and accepts severity changes and comments. The demo wires it
-to `hunch serve` running `examples/severity.yaml`:
+`examples/ticketdesk` is a toy ticket system: tickets live in team queues, it
+sends a webhook when one is created, and accepts rerouting, severity changes
+and comments. The demo wires it to `hunch serve` running
+`examples/triage.yaml`, triage for a network team:
 
-1. Jev decides the severity (it can only stay or go down).
-2. Jev establishes the facts the SLA cares about in one multi-question call:
-   core feature down? workaround? how many users? what kind of ticket?
-3. A second model, a local Ollama model (the `notes` backend), writes the note
-   from the SLA, the decision and those facts.
-4. Jev checks the note before it goes on the ticket; if it's off, a plain note
-   built from the facts is posted instead.
+1. **Whose ticket is it?** Jev picks the team from what each team handles
+   (network, desktop, identity, applications). "My computer is down" is ours
+   only if the problem is its connection. Not ours: the ticket is moved to that
+   team's queue with a note saying why.
+2. **Ours: is the severity right?** A rule checks only sev2 and sev2.5; Jev
+   picks the severity under the SLA, only the same or lower.
+3. Jev establishes the facts the SLA turns on in one multi-question call: no
+   connection at all? workaround? how many people? what kind of ticket?
+4. A local Ollama model (the `notes` backend) writes the note from the SLA,
+   the decision and those facts; Jev checks it, and a plain note built from
+   the facts is posted if it's off.
 
 ```sh
 ollama pull qwen2.5:1.5b && ollama serve   # the note model
 examples/ticketdesk/demo.sh                # needs TYPESAFE_API_KEY in .env
 ```
 
-It creates five tickets and prints what happened to each:
+It creates six tickets and prints what happened to each:
 
 ```
-#1 [sev3] Logo slightly blurry on the settings page
-    created as sev2 · severity sev2 → sev3 · comment added
-    comment: Severity moved from sev2 to sev3 under our SLA. Kind: cosmetic · core feature down: no · workaround: no · users affected: some.
-#2 [sev2] Checkout fails for all EU customers
-    created as sev2
-#3 [sev3] How do I change my invoice email?
-    created as sev2.5 · severity sev2.5 → sev3 · comment added
-#4 [sev2.5] CSV export times out for large accounts
-#5 [sev1] Whole platform down               (out of scope: only sev2 and sev2.5 are checked)
+#1 [sev3 · network] My computer is down             (no internet, hotspot works)
+    created as sev2 in network · severity sev2 → sev3 · comment added
+#2 [sev2 · desktop] My computer is down             (won't power on)
+    created as sev2 in network · routed network → desktop · comment added
+#3 [sev2 · network] No Wi-Fi on the 3rd floor
+#4 [sev2.5 · network] VPN keeps dropping
+    created as sev2 in network · severity sev2 → sev2.5 · comment added
+#5 [sev2 · identity] Cannot log in, password expired
+    created as sev2 in network · routed network → identity · comment added
+#6 [sev1 · network] Whole Lisbon office has no internet   (sev1: left to people)
 ```
 
-Replay any of them step by step: `go run ./cmd/hunch tui examples/severity.yaml --runs .demo/runs`.
+Replay any of them step by step: `go run ./cmd/hunch tui examples/triage.yaml --runs .demo/runs`.
+
+The 12 test cases in `examples/triage.tests/` cover ownership and severity,
+including both readings of "my computer is down":
+`go run ./cmd/hunch test examples/triage.yaml` (12/12 with Jev deciding).
+The demo runs the real system and writes to tickets; the tests fake the
+ticket fetch, never write, and say pass or fail per ticket.
 
 ## Examples
 
@@ -347,7 +359,7 @@ Each is a different shape of the same building blocks; none is special.
 |---|---|
 | `examples/inbox.yaml` | Chained decisions: gate, classify, multi-question, score, route on confidence. |
 | `examples/respond.yaml` | Decide, write with a model, judge the result, then send it or hand it to a person. |
-| `examples/severity.yaml` | A webhook-driven check: a rule limits scope, a model re-classifies (only downwards), a writer explains, the source record is updated. |
+| `examples/triage.yaml` | Webhook-driven triage: a model decides ownership and reroutes, a rule limits scope, a model re-classifies (only downwards), a second model writes a note that the first one checks, the source record is updated. |
 
 Each has a `<flow>.tests/` folder you can run with `hunch test`.
 

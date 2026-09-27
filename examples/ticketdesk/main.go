@@ -1,7 +1,8 @@
 // Command ticketdesk is a tiny ticket system for trying hunch locally. It
-// keeps tickets in memory, sends a webhook to hunch when one is created, and
-// accepts the severity changes and comments hunch makes, keeping a history
-// so you can see what happened.
+// keeps tickets in memory, each in a team's queue (network by default),
+// sends a webhook to hunch when one is created, and accepts the severity
+// changes, rerouting to other teams and comments hunch makes, keeping a
+// history so you can see what happened.
 //
 //	go run ./examples/ticketdesk --webhook http://127.0.0.1:8080/
 //	curl -d '{"severity":"sev2","title":"...","description":"...","request":"..."}' http://127.0.0.1:8090/tickets
@@ -27,6 +28,7 @@ import (
 type Ticket struct {
 	ID          int       `json:"id"`
 	Severity    string    `json:"severity"`
+	Team        string    `json:"team"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
 	Request     string    `json:"request"`
@@ -119,11 +121,14 @@ func (d *desk) create(w http.ResponseWriter, r *http.Request) {
 	}
 	d.mu.Lock()
 	t.ID, d.next = d.next, d.next+1
+	if t.Team == "" {
+		t.Team = "network"
+	}
 	t.Comments = []Comment{}
-	t.History = []string{fmt.Sprintf("created as %s", t.Severity)}
+	t.History = []string{fmt.Sprintf("created as %s in %s", t.Severity, t.Team)}
 	d.tickets[t.ID] = &t
 	d.mu.Unlock()
-	log.Printf("#%d created: %s [%s]", t.ID, t.Title, t.Severity)
+	log.Printf("#%d created: %s [%s, %s]", t.ID, t.Title, t.Severity, t.Team)
 	writeJSON(w, http.StatusCreated, t)
 	if d.webhook != "" {
 		go d.notify(t.ID)
@@ -183,9 +188,10 @@ func (d *desk) seenKey(r *http.Request) bool {
 func (d *desk) update(w http.ResponseWriter, r *http.Request, id int) {
 	var change struct {
 		Severity string `json:"severity"`
+		Team     string `json:"team"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&change); err != nil || change.Severity == "" {
-		http.Error(w, "want {\"severity\": \"...\"}", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&change); err != nil || (change.Severity == "" && change.Team == "") {
+		http.Error(w, "want {\"severity\": \"...\"} and/or {\"team\": \"...\"}", http.StatusBadRequest)
 		return
 	}
 	d.mu.Lock()
@@ -195,10 +201,17 @@ func (d *desk) update(w http.ResponseWriter, r *http.Request, id int) {
 		http.Error(w, "no such ticket", http.StatusNotFound)
 		return
 	}
-	if !d.seenKey(r) && change.Severity != t.Severity {
-		t.History = append(t.History, fmt.Sprintf("severity %s → %s", t.Severity, change.Severity))
-		log.Printf("#%d severity %s → %s", id, t.Severity, change.Severity)
-		t.Severity = change.Severity
+	if !d.seenKey(r) {
+		if change.Severity != "" && change.Severity != t.Severity {
+			t.History = append(t.History, fmt.Sprintf("severity %s → %s", t.Severity, change.Severity))
+			log.Printf("#%d severity %s → %s", id, t.Severity, change.Severity)
+			t.Severity = change.Severity
+		}
+		if change.Team != "" && change.Team != t.Team {
+			t.History = append(t.History, fmt.Sprintf("routed %s → %s", t.Team, change.Team))
+			log.Printf("#%d routed %s → %s", id, t.Team, change.Team)
+			t.Team = change.Team
+		}
 	}
 	writeJSON(w, http.StatusOK, t)
 }

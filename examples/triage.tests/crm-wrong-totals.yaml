@@ -1,0 +1,12 @@
+description: A business app shows wrong data but loads fine (applications team)
+input: {ticket_id: 110}
+http:
+  fetch:
+    body:
+      severity: sev2
+      title: CRM shows wrong deal totals
+      description: The CRM loads fine, but the pipeline report shows totals that don't match the deals listed underneath.
+      request: Please fix the report totals.
+expect:
+  owner: applications
+  to_applications.team: applications

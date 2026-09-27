@@ -1,0 +1,12 @@
+description: '"My computer is down" and it will not turn on (desktop team, not ours)'
+input: {ticket_id: 102}
+http:
+  fetch:
+    body:
+      severity: sev2
+      title: My computer is down
+      description: When I press the power button nothing happens, no lights, no fan. It was fine yesterday. Charger is plugged in.
+      request: I need a working computer.
+expect:
+  owner: desktop
+  to_desktop.team: desktop

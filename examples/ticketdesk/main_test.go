@@ -63,3 +63,17 @@ func TestDeskToken(t *testing.T) {
 		t.Errorf("with token: %d", rec.Code)
 	}
 }
+
+func TestDeskTeams(t *testing.T) {
+	d := &desk{tickets: map[int]*Ticket{}, next: 1, seen: map[string]bool{}}
+	do(t, d, "POST", "/tickets", `{"severity":"sev2","title":"Laptop won't turn on"}`)
+	do(t, d, "PATCH", "/tickets/1", `{"team":"desktop"}`)
+	var tk Ticket
+	json.Unmarshal(do(t, d, "GET", "/tickets/1", "").Body.Bytes(), &tk)
+	if tk.Team != "desktop" || tk.Severity != "sev2" || tk.History[0] != "created as sev2 in network" || tk.History[1] != "routed network → desktop" {
+		t.Errorf("ticket = %+v", tk)
+	}
+	if rec := do(t, d, "PATCH", "/tickets/1", `{}`); rec.Code != 400 {
+		t.Errorf("empty change: %d", rec.Code)
+	}
+}
