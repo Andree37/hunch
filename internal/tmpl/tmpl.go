@@ -68,19 +68,28 @@ func RenderFunc(s string, state map[string]any, escape func(val string, at int) 
 	return b.String(), nil
 }
 
+// Lookup resolves a dotted path in state. Keys may themselves contain dots
+// ("sev2.5"): at each level the longest key that exists wins.
 func Lookup(state map[string]any, path string) (any, bool) {
-	var cur any = state
-	for _, part := range strings.Split(path, ".") {
-		m, ok := cur.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		cur, ok = m[part]
-		if !ok {
-			return nil, false
+	return lookup(state, strings.Split(path, "."))
+}
+
+func lookup(cur any, parts []string) (any, bool) {
+	if len(parts) == 0 {
+		return cur, true
+	}
+	m, ok := cur.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	for i := len(parts); i > 0; i-- {
+		if next, ok := m[strings.Join(parts[:i], ".")]; ok {
+			if v, ok := lookup(next, parts[i:]); ok {
+				return v, true
+			}
 		}
 	}
-	return cur, true
+	return nil, false
 }
 
 func Format(v any) string {

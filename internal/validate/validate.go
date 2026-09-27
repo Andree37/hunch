@@ -234,7 +234,7 @@ func (v *validator) refs() {
 			for _, ref := range tmpl.Refs(text) {
 				root := ref.Root()
 				if v.f.Node(root) == nil {
-					continue // an input; runs check they're given
+					continue // an input or {{outputs.x}}; runs check those
 				}
 				if ancestors == nil {
 					ancestors = v.ancestors(n.ID, parents)

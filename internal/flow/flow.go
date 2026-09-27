@@ -36,6 +36,10 @@ const (
 	Default = "_"      // taken when nothing else matches
 )
 
+// OutputsRef is the reserved state key holding every output set so far, so
+// later nodes can read {{outputs.name}} whichever branch set it.
+const OutputsRef = "outputs"
+
 // DefaultThreshold is the confidence below which a decision takes its
 // "unsure" route, when the node has one.
 const DefaultThreshold = 0.6
@@ -156,6 +160,10 @@ func (n *Node) Texts() []string {
 	var out []string
 	for _, q := range n.Questions {
 		out = append(out, q.Text)
+		for _, c := range q.Criteria {
+			out = append(out, c)
+		}
+		out = append(out, q.Levels...)
 	}
 	if n.Switch != "" {
 		out = append(out, n.Switch)
@@ -194,7 +202,8 @@ func bodyStrings(v any) []string {
 }
 
 // Inputs returns the values a run takes: declared inputs first, then any
-// other ref root that no node produces, in first-use order.
+// other ref root that no node produces and the flow's state doesn't define,
+// in first-use order.
 func (f *Flow) Inputs() []string {
 	seen := map[string]bool{}
 	var out []string
@@ -205,7 +214,9 @@ func (f *Flow) Inputs() []string {
 	for _, n := range f.Nodes {
 		for _, t := range n.Texts() {
 			for _, ref := range tmpl.Refs(t) {
-				if r := ref.Root(); f.Node(r) == nil && !seen[r] {
+				r := ref.Root()
+				_, constant := f.State[r]
+				if f.Node(r) == nil && r != OutputsRef && !constant && !seen[r] {
 					seen[r] = true
 					out = append(out, r)
 				}
@@ -376,6 +387,9 @@ func parseNodes(f *Flow, n *yaml.Node) error {
 		return err
 	}
 	for _, id := range keys {
+		if id == OutputsRef {
+			return errAt(fields[id], "%q is reserved for {{outputs.name}}; pick another node name", id)
+		}
 		node, err := parseNode(id, fields[id])
 		if err != nil {
 			return err

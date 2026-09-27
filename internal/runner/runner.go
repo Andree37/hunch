@@ -65,10 +65,14 @@ func Run(ctx context.Context, f *flow.Flow, initial map[string]any, opts Options
 		opts.Stdout = io.Discard
 	}
 
-	res := &Result{State: maps.Clone(initial), Outputs: map[string]any{}}
-	if res.State == nil {
-		res.State = map[string]any{}
+	// The flow's own state holds constants (e.g. shared definitions); the
+	// caller's input goes on top.
+	state := maps.Clone(f.State)
+	if state == nil {
+		state = map[string]any{}
 	}
+	maps.Copy(state, initial)
+	res := &Result{State: state, Outputs: map[string]any{}}
 	visits := map[string]int{}
 
 	for step, cur := 1, f.Start; cur != ""; step++ {
@@ -115,6 +119,9 @@ func Run(ctx context.Context, f *flow.Flow, initial map[string]any, opts Options
 		res.CostUSD += ev.CostUSD
 		if n.Kind == flow.Action && n.Action.Type == flow.ActOutput {
 			maps.Copy(res.Outputs, ev.Output.(map[string]any))
+			// Later nodes read them as {{outputs.name}}; kept out of state
+			// until something is set, so deciders aren't shown an empty map.
+			res.State[flow.OutputsRef] = res.Outputs
 		}
 		if opts.OnEvent != nil {
 			opts.OnEvent(ev)
@@ -134,13 +141,12 @@ func decideNode(ctx context.Context, f *flow.Flow, n *flow.Node, state map[strin
 
 	qs := make([]flow.Question, len(n.Questions))
 	for i, q := range n.Questions {
-		text, err := tmpl.Render(q.Text, state)
+		q, err := renderQuestion(q, state)
 		if err != nil {
 			return err
 		}
-		q.Text = text
 		qs[i] = q
-		ev.Asked = append(ev.Asked, text)
+		ev.Asked = append(ev.Asked, q.Text)
 	}
 
 	resp, err := decide(ctx, b, state, qs)
@@ -164,6 +170,34 @@ func decideNode(ctx context.Context, f *flow.Flow, n *flow.Node, state map[strin
 	ev.Output = decisionState(d)
 	ev.Branch, ev.Next, err = route(n, d, f.ThresholdFor(n))
 	return err
+}
+
+// renderQuestion fills refs in a question's text, answer descriptions and
+// score levels, so shared definitions can live once in state.
+func renderQuestion(q flow.Question, state map[string]any) (flow.Question, error) {
+	var err error
+	if q.Text, err = tmpl.Render(q.Text, state); err != nil {
+		return q, err
+	}
+	if len(q.Criteria) > 0 {
+		c := make(map[string]string, len(q.Criteria))
+		for k, v := range q.Criteria {
+			if c[k], err = tmpl.Render(v, state); err != nil {
+				return q, err
+			}
+		}
+		q.Criteria = c
+	}
+	if len(q.Levels) > 0 {
+		l := make([]string, len(q.Levels))
+		for i, v := range q.Levels {
+			if l[i], err = tmpl.Render(v, state); err != nil {
+				return q, err
+			}
+		}
+		q.Levels = l
+	}
+	return q, nil
 }
 
 // decide asks the backend, splitting multi-question requests for backends

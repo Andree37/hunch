@@ -159,3 +159,27 @@ nodes:
 		t.Errorf("update = %v", upd)
 	}
 }
+
+func TestOutputsAndTemplatedCriteria(t *testing.T) {
+	res, err := runFlow(t, `
+state:
+  sla: {high: "Down for everyone", low: "Cosmetic"}
+backends: {m: {kind: mock, answers: {a: low, b: low}}}
+nodes:
+  scope: {switch: "{{sev}}", then: {x: a, _: b}}
+  a:
+    choice: "Which severity?"
+    options: {high: "{{sla.high}}", low: "{{sla.low}}"}
+    then: {_: set_a}
+  b: {choice: "Which?", options: [high, low], then: {_: set_b}}
+  set_a: {action: output, set: {new: "{{a.answer}}"}, then: explain}
+  set_b: {action: output, set: {new: "{{b.answer}}"}, then: explain}
+  explain: {action: log, message: "moving to {{outputs.new}}"}
+`, map[string]any{"sev": "x"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg := res.State["explain"].(map[string]any)["message"]; msg != "moving to low" {
+		t.Errorf("explain = %q", msg)
+	}
+}
