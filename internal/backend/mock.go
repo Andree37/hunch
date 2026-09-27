@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/Andree37/hunch/internal/flow"
 )
@@ -186,4 +187,15 @@ func scoreDecision(q flow.Question, probs []float64) Decision {
 	d.Answer = ev
 	d.Confidence = top
 	return d
+}
+
+// Write returns a deterministic stand-in, so flows with llm nodes run offline.
+func (m *Mock) Write(_ context.Context, req WriteRequest) (WriteResponse, error) {
+	h := fnv.New32a()
+	h.Write([]byte(m.seed + req.System + req.Prompt))
+	first, _, _ := strings.Cut(req.Prompt, "\n")
+	if len(first) > 60 {
+		first = first[:60] + "…"
+	}
+	return WriteResponse{Text: fmt.Sprintf("[mock text %04x] %s", h.Sum32()&0xffff, first)}, nil
 }

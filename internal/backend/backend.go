@@ -42,8 +42,24 @@ func New(cfg flow.BackendConfig) (Backend, error) {
 		return NewMock(cfg)
 	case "jev":
 		return NewJev(cfg)
+	case "openai":
+		return newOpenAI(cfg)
+	case "anthropic":
+		return newAnthropic(cfg)
+	case "bedrock":
+		return newBedrock(cfg)
 	}
-	return nil, fmt.Errorf("backend %q: kind %q is not supported yet", cfg.Name, cfg.Kind)
+	return nil, fmt.Errorf("backend %q: unknown kind %q (want mock, jev, openai, anthropic, bedrock)", cfg.Name, cfg.Kind)
+}
+
+// CanWrite reports whether backends of a kind can generate text for `llm`
+// nodes. Every kind can make decisions.
+func CanWrite(kind string) bool {
+	switch kind {
+	case "mock", "openai", "anthropic", "bedrock":
+		return true
+	}
+	return false
 }
 
 type statusKey struct{}

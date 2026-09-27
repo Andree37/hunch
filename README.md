@@ -110,12 +110,19 @@ your environment take precedence.
 
 ## Backends
 
-| Kind | Status |
-|---|---|
-| `mock` | Deterministic answers from a hash of question + state. `answers: {node: value}` or `{node.question: value}` forces answers. |
-| `jev` | TypeSafe's Jev via OpenRouter (`provider: openrouter`, needs `$OPENROUTER_API_KEY`) or TypeSafe directly (`provider: typesafe`, `$TYPESAFE_API_KEY`). Also `model`, `api_key_env`, `url`, `timeout`, `max_retries`. Retries 429/529/5xx. |
-| `laya` | planned (local, via HTTP sidecar) |
-| `ollama` / `llm` | planned |
+Any backend can make decisions. Chat-model backends can also write text for
+`llm` nodes. Chat models report their own confidence, so their probabilities
+aren't calibrated the way Jev's are.
+
+| Kind | Decides | Writes | Options |
+|---|---|---|---|
+| `mock` | ✓ | ✓ | Deterministic, offline. `answers: {node: value}` forces answers. |
+| `jev` | ✓ | | TypeSafe's Jev via `provider: typesafe` (`$TYPESAFE_API_KEY`) or `openrouter` (`$OPENROUTER_API_KEY`). |
+| `openai` | ✓ | ✓ | Any OpenAI-compatible server: OpenAI, Ollama (`base_url: http://localhost:11434/v1`), OpenRouter, vLLM, LM Studio. `model`, `base_url`, `api_key_env` (default `OPENAI_API_KEY`). |
+| `anthropic` | ✓ | ✓ | Claude via the Anthropic API. `model` (e.g. `claude-opus-5`), `api_key_env` (default `ANTHROPIC_API_KEY`), `base_url`. |
+| `bedrock` | ✓ | ✓ | Any Amazon Bedrock model via the Converse API. `model` (model or inference profile ID), `region`, `profile`; AWS credentials from the usual chain. |
+
+Chat backends also take `max_tokens`, `timeout`, and `price_in_per_mtok` / `price_out_per_mtok` to report cost.
 
 ## Test cases
 
