@@ -134,3 +134,28 @@ func TestShellTimeout(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestDryRunStillReads(t *testing.T) {
+	var methods []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"severity": "sev2", "title": "Login broken"}`)
+	}))
+	defer srv.Close()
+	res, err := runFlow(t, `
+nodes:
+  fetch: {action: http, method: GET, url: "{{base}}/tickets/{{id}}", then: update}
+  update: {action: http, method: PATCH, url: "{{base}}/tickets/{{id}}", body: {severity: sev3, was: "{{fetch.body.severity}}"}}
+`, map[string]any{"base": srv.URL, "id": 42.0}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(methods) != 1 || methods[0] != "GET" {
+		t.Errorf("server saw %v, want only the GET", methods)
+	}
+	upd := res.State["update"].(map[string]any)
+	if upd["dry_run"] != true || !strings.Contains(upd["body"].(string), `"was":"sev2"`) {
+		t.Errorf("update = %v", upd)
+	}
+}

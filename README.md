@@ -86,8 +86,9 @@ nodes:
 
 - **Sending is a decision.** Put the "should this go out?" question before
   the `http` node, as above.
-- **Dry runs.** `hunch test` and the TUI never send: `http` nodes record the
-  request they would make. Use `hunch test --live` or `L` in the TUI to send
+- **Dry runs.** `hunch test` and the TUI never write: `http` nodes that
+  POST/PUT/PATCH/DELETE record the request they would make. GETs still run,
+  since they only read and later nodes need the data. Use `hunch test --live` or `L` in the TUI to send
   for real. `hunch run` sends unless given `--dry-run`.
 - **Secrets** go in `$VARS` in `url` and `headers`, read from the environment,
   so they never enter state or any model's prompt. Refs in a URL are escaped.

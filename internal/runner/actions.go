@@ -49,8 +49,9 @@ func llmNode(ctx context.Context, f *flow.Flow, n *flow.Node, state map[string]a
 
 // httpNode calls an API. Refs in the URL are escaped for where they sit;
 // $VARS in the URL and headers come from the environment (so secrets stay
-// out of state and out of every prompt). In a dry run nothing is sent and
-// the request is recorded instead.
+// out of state and out of every prompt). In a dry run, GETs still happen
+// (they only read, and later nodes need the data) while anything that
+// writes is recorded instead of sent.
 func httpNode(ctx context.Context, n *flow.Node, state map[string]any, opts Options, ev *Event) error {
 	a := n.Action
 	rawURL, err := tmpl.RenderFunc(a.URL, state, func(v string, at int) string {
@@ -71,7 +72,7 @@ func httpNode(ctx context.Context, n *flow.Node, state map[string]any, opts Opti
 	if err != nil {
 		return err
 	}
-	if opts.DryRun {
+	if opts.DryRun && a.Method != http.MethodGet {
 		out := map[string]any{"dry_run": true, "method": a.Method, "url": rawURL}
 		if body != nil {
 			out["body"] = string(body)
