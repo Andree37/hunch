@@ -56,3 +56,13 @@ func TestLookupDottedKeys(t *testing.T) {
 		t.Error("versions.v2.6 should not resolve")
 	}
 }
+
+func TestBooleansReadAsYesNo(t *testing.T) {
+	got, _ := Render("down: {{a}}, workaround: {{b}}", map[string]any{"a": true, "b": false})
+	if got != "down: yes, workaround: no" {
+		t.Errorf("got %q", got)
+	}
+	if Format(true) != "true" {
+		t.Error("Format itself stays true/false")
+	}
+}

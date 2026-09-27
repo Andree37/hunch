@@ -54,7 +54,7 @@ func RenderFunc(s string, state map[string]any, escape func(val string, at int) 
 		}
 		str := ""
 		if ok {
-			str = Format(v)
+			str = text(v)
 		}
 		if escape != nil {
 			str = escape(str, m[0])
@@ -90,6 +90,18 @@ func lookup(cur any, parts []string) (any, bool) {
 		}
 	}
 	return nil, false
+}
+
+// text is how a value reads inside a template: like Format, except yes/no
+// answers read as "yes" and "no" rather than "true" and "false".
+func text(v any) string {
+	if b, ok := v.(bool); ok {
+		if b {
+			return "yes"
+		}
+		return "no"
+	}
+	return Format(v)
 }
 
 func Format(v any) string {
