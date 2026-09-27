@@ -1,0 +1,127 @@
+# Check a new ticket's severity against the SLA and lower it when it doesn't
+# fit, then say why on the ticket. It never raises a severity, and only
+# sev2 and sev2.5 tickets are checked.
+#
+# Triggered by a webhook when a ticket is created:
+#
+#   export TICKETS_API=https://tickets.example.com/api TICKETS_TOKEN=...
+#   hunch serve examples/severity.yaml --backend jev --token-env HOOK_TOKEN
+#   curl -H "Authorization: Bearer $HOOK_TOKEN" -d @ticket.json http://127.0.0.1:8080/
+#
+# where ticket.json is the webhook body, e.g.
+#   {"ticket": {"id": 123, "severity": "sev2", "title": "...", "description": "...", "request": "..."}}
+#
+# If your webhook only sends an id, add a GET node first and read the ticket
+# from it instead (GETs still run in dry runs):
+#   fetch: {action: http, method: GET, url: "$TICKETS_API/tickets/{{ticket_id}}",
+#           headers: {Authorization: "Bearer $TICKETS_TOKEN"}, then: scope}
+#   ...then use {{fetch.body.severity}} and so on below.
+#
+# Try it without touching real tickets (writes are only recorded):
+#   hunch tui examples/severity.yaml
+#   hunch test examples/severity.yaml --backend jev
+name: severity-check
+
+backends:
+  default: mock
+  writer: mock
+  mock: {kind: mock, seed: demo}
+  jev: {kind: jev, provider: typesafe}
+  claude: {kind: anthropic, model: claude-opus-5}
+  bedrock: {kind: bedrock, model: anthropic.claude-opus-5, region: us-east-1}
+
+# The SLA, written once and used by every node below.
+# EXAMPLE definitions - replace them with your SLA.
+state:
+  sla:
+    sev2: A core feature is down or badly degraded for many users, with no workaround.
+    sev2.5: A core feature is degraded for some users, or a workaround exists.
+    sev3: A minor issue, a cosmetic problem, a question, or a feature request.
+
+nodes:
+  # A rule, not a model: only these two severities are checked.
+  scope:
+    switch: "{{ticket.severity}}"
+    then:
+      sev2: from_sev2
+      sev2.5: from_sev2_5
+      _: out_of_scope
+
+  # Each starting severity may only stay or go down, so nothing can be raised.
+  from_sev2:
+    choice: |-
+      Under our SLA, which severity does this ticket really have? It was filed as sev2.
+      Title: {{ticket.title}}
+      Description: {{ticket.description}}
+      Request: {{ticket.request}}
+    options:
+      sev2: "{{sla.sev2}}"
+      sev2.5: "{{sla.sev2.5}}"
+      sev3: "{{sla.sev3}}"
+    threshold: 0.7
+    then: {sev2: within_sla, unsure: for_human, _: lower_from_sev2}
+
+  from_sev2_5:
+    choice: |-
+      Under our SLA, which severity does this ticket really have? It was filed as sev2.5.
+      Title: {{ticket.title}}
+      Description: {{ticket.description}}
+      Request: {{ticket.request}}
+    options:
+      sev2.5: "{{sla.sev2.5}}"
+      sev3: "{{sla.sev3}}"
+    threshold: 0.7
+    then: {sev2.5: within_sla, unsure: for_human, _: lower_from_sev2_5}
+
+  lower_from_sev2:
+    action: output
+    set: {action: lowered, from: sev2, to: "{{from_sev2.answer}}"}
+    then: explain
+
+  lower_from_sev2_5:
+    action: output
+    set: {action: lowered, from: sev2.5, to: "{{from_sev2_5.answer}}"}
+    then: explain
+
+  explain:
+    action: llm
+    system: You write short, neutral notes for support tickets. No apologies, no promises.
+    prompt: |-
+      Our SLA defines severities as:
+      - sev2: {{sla.sev2}}
+      - sev2.5: {{sla.sev2.5}}
+      - sev3: {{sla.sev3}}
+
+      This ticket was filed as {{outputs.from}} and is being moved to {{outputs.to}}.
+      Title: {{ticket.title}}
+      Description: {{ticket.description}}
+
+      In two or three sentences, explain why it fits {{outputs.to}} rather than {{outputs.from}}.
+    then: update
+
+  update:
+    action: http
+    method: PATCH
+    url: "$TICKETS_API/tickets/{{ticket.id}}"
+    headers: {Authorization: "Bearer $TICKETS_TOKEN"}
+    body: {severity: "{{outputs.to}}"}
+    then: comment
+
+  comment:
+    action: http
+    method: POST
+    url: "$TICKETS_API/tickets/{{ticket.id}}/comments"
+    headers: {Authorization: "Bearer $TICKETS_TOKEN"}
+    body: {body: "{{explain.text}}"}
+
+  within_sla:
+    action: output
+    set: {action: kept}
+
+  for_human:
+    action: output
+    set: {action: needs_human, reason: "the severity call was too close to make automatically"}
+
+  out_of_scope:
+    action: output
+    set: {action: skipped, reason: "only sev2 and sev2.5 tickets are checked"}

@@ -45,6 +45,38 @@ nodes:
     run: say "hi {{who}}"             # refs are escaped for whatever quotes they sit in
 ```
 
+### Rules
+
+A `switch` node routes on a value with plain code, no model involved. Use it
+for fixed rules; save the model for judgement.
+
+```yaml
+scope:
+  switch: "{{ticket.severity}}"
+  then: {sev2: check_sev2, sev2.5: check_sev2_5, _: skip}
+```
+
+### Shared definitions and outputs
+
+The flow's `state:` holds constants every node can use, so a definition is
+written once. They're sent to deciders along with the input, and are never
+asked for as inputs. Refs work in answer descriptions and score levels too,
+and keys may contain dots (`{{sla.sev2.5}}`).
+
+```yaml
+state:
+  sla:
+    sev2: A core feature is down for many users, no workaround.
+    sev2.5: Degraded for some users, or a workaround exists.
+nodes:
+  check:
+    choice: "Which severity fits? {{ticket.title}}"
+    options: {sev2: "{{sla.sev2}}", sev2.5: "{{sla.sev2.5}}"}
+```
+
+Once an `output` node has run, later nodes can read everything set so far as
+`{{outputs.name}}`, whichever branch set it.
+
 ### Actions
 
 Decisions steer; actions do the work. Every action's result lands in state
@@ -158,6 +190,29 @@ renders empty when missing.
 Score answers are expected values, so a run can land between levels; the
 validator warns about gaps.
 
+## Serving
+
+`hunch serve FLOW` runs the flow for every `POST /`: the JSON body is the
+input, the reply is the path taken and the outputs. Point a webhook at it
+(e.g. "ticket created").
+
+```sh
+hunch serve examples/severity.yaml --backend jev --token-env HOOK_TOKEN
+curl -H "Authorization: Bearer $HOOK_TOKEN" -d '{"ticket": {...}}' http://127.0.0.1:8080/
+# {"path": ["scope", "from_sev2", ...], "outputs": {"action": "lowered", "to": "sev3"}, "cost_usd": 0.00003}
+```
+
+- Listens on `127.0.0.1:8080` unless `--addr` says otherwise.
+- `--token-env VAR` requires `Authorization: Bearer <$VAR>`.
+- Inputs are checked like everywhere else; bad or missing ones get a 400.
+- Live by default; `--dry-run` records writes instead of sending them.
+- A failed run returns 500 with the error and `failed_at` node.
+- `--trace file.jsonl` keeps every run's events; `GET /healthz` for checks.
+
+See `examples/severity.yaml`: only sev2 / sev2.5 tickets are checked (a rule),
+the model picks a severity that can only stay or go down, a writer explains
+why, and the ticket is updated and commented on.
+
 ## Keys
 
 Put API keys in `.env` (gitignored; see `.env.example`). Variables already set in
@@ -241,4 +296,5 @@ Keys: `j/k` move · `tab` next pane · `enter` edit / load case · `r` run (noth
   answers, unreachable nodes, loops, refs to nodes that haven't run yet.
 - `hunch tui FLOW [--backend name] [--set k=v]... [--state f.json]`
 - `hunch test FLOW [--backend name] [--live] [case...]`: run test cases, check expectations. `http` nodes don't send unless `--live`.
+- `hunch serve FLOW [--addr host:port] [--backend name] [--dry-run] [--token-env VAR] [--trace file]`: run the flow for each webhook POST.
 - `hunch run FLOW [--backend name] [--case name] [--set k=v]... [--state f.json] [--trace f.jsonl] [--json] [--max-visits N]`

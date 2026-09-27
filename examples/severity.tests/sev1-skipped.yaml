@@ -1,0 +1,10 @@
+description: Sev1 is out of scope and never touched
+input:
+  ticket:
+    id: 103
+    severity: sev1
+    title: Whole platform down
+    description: Nothing loads for anyone.
+    request: Help.
+expect:
+  out_of_scope.action: skipped
