@@ -108,8 +108,10 @@ func (m *Model) flowLines(w, h int) []string {
 	if m.flow == nil {
 		return []string{sRed.Render(fmt.Sprint(m.loadErr))}
 	}
+	warn := m.otherFlowLines()
 	if m.flowView == viewPath && m.run != nil && len(m.run.path) > 0 {
 		lines, rowLine := m.pathLines()
+		lines = append(warn, lines...)
 		if c := min(m.cursor, len(rowLine)-1); c >= 0 {
 			if top := rowLine[c] - h + 3; top > 0 {
 				lines = lines[top:]
@@ -118,7 +120,7 @@ func (m *Model) flowLines(w, h int) []string {
 		return lines
 	}
 	rows := m.layout()
-	var lines []string
+	lines := warn
 	for i, r := range rows {
 		lines = append(lines, m.rowLine(r, i == m.cursor))
 	}

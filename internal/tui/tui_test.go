@@ -666,3 +666,33 @@ func TestReplayedActionsShowTheirResults(t *testing.T) {
 		}
 	}
 }
+
+func TestRunFromAnotherFlowIsFlagged(t *testing.T) {
+	runs := recordRuns(t, map[string]any{"sender": "carol", "message": "hi"}) // recorded with testdata/inbox.yaml
+	other := filepath.Join(t.TempDir(), "other.yaml")
+	os.WriteFile(other, []byte(`nodes: {fetch: {action: log, message: hi}}`), 0o644)
+
+	m, _ := New(other, nil, "", false)
+	m.SetRuns(runs)
+	m.Update(tea.WindowSizeMsg{Width: 170, Height: 40})
+	screen := ansi.Strip(m.View())
+	if !strings.Contains(screen, "⚠") || !strings.Contains(screen, "other flow: testdata/inbox.yaml") {
+		t.Errorf("run list should flag the other flow:\n%s", screen)
+	}
+	m.Update(press("2"))
+	m.Update(press("enter"))
+	screen = ansi.Strip(m.View())
+	if !strings.Contains(screen, "This run was recorded with testdata/inbox.yaml") || !strings.Contains(screen, "hunch tui testdata/inbox.yaml --runs") {
+		t.Errorf("opening it should explain and give the right command:\n%s", screen)
+	}
+
+	// With the right flow, no warning.
+	m2, _ := New("testdata/inbox.yaml", nil, "mock", false)
+	m2.SetRuns(runs)
+	m2.Update(tea.WindowSizeMsg{Width: 170, Height: 40})
+	m2.Update(press("2"))
+	m2.Update(press("enter"))
+	if strings.Contains(ansi.Strip(m2.View()), "⚠ This run was recorded") {
+		t.Error("a run from this flow must not be flagged")
+	}
+}

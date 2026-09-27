@@ -114,6 +114,49 @@ func (m *Model) openRun(i int) {
 	m.replay, m.replayK = tr, len(tr.Steps)
 	m.run = replayRun(tr, m.replayK)
 	m.flash = "opened run " + tr.ID
+	if m.otherFlow(tr) {
+		m.flash = "this run was recorded with " + flowName(tr) + ", not this flow"
+	}
+}
+
+// otherFlow reports whether a recorded run came from a different flow than
+// the one open: it went through steps this flow doesn't have.
+func (m *Model) otherFlow(tr *trace.Run) bool {
+	if m.flow == nil {
+		return false
+	}
+	for _, ev := range tr.Steps {
+		if m.flow.Node(ev.Node) == nil {
+			return true
+		}
+	}
+	for _, id := range tr.Path {
+		if m.flow.Node(id) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func flowName(tr *trace.Run) string {
+	if tr.Flow == "" {
+		return "another flow"
+	}
+	return tr.Flow
+}
+
+// otherFlowLines explains, above the graph, why a run from another flow
+// shows nothing, and how to open it properly.
+func (m *Model) otherFlowLines() []string {
+	if m.replay == nil || !m.otherFlow(m.replay) {
+		return nil
+	}
+	return []string{
+		sYellow.Render("⚠ This run was recorded with " + flowName(m.replay) + ", not " + m.path + "."),
+		sYellow.Render("  Its steps don't exist here, so nothing below shows as run. Open it with:"),
+		"  " + sBold.Render("hunch tui "+flowName(m.replay)+" --runs "+m.runsPath),
+		"",
+	}
 }
 
 // replaying reports whether the views show a recorded run.
@@ -178,6 +221,10 @@ func (m *Model) runLines(w, h int) []string {
 		end := ""
 		if len(tr.Path) > 0 {
 			end = "→ " + tr.Path[len(tr.Path)-1]
+		}
+		if m.otherFlow(tr) {
+			icon = sYellow.Render("⚠")
+			end = "other flow: " + flowName(tr)
 		}
 		line := fmt.Sprintf("%s%s %s  %s  %s", marker, icon, sDim.Render(when), inputSummary(tr.Input), sDim.Render(end))
 		if m.replay == tr {
