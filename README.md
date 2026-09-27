@@ -284,6 +284,7 @@ hunch tui examples/triage.yaml       # lists and replays them
   it updates while serve keeps recording (a file on change; a directory or
   S3 every 10s, in the background).
 - Enter loads a run into the graph and path views, with its input in pane 4.
+- `esc` (or Enter on it again) closes it and puts back what you had before.
 - `s` replays it one step at a time, exactly as it happened; `r` runs the same
   input again live, e.g. after changing the flow, to see if it now goes the
   way it should.

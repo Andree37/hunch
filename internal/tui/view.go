@@ -689,7 +689,7 @@ func (m *Model) statusBar() string {
 	var left string
 	switch {
 	case m.replaying() && m.editing == editNone:
-		left = " s next step · r run again live · n save as test · enter open another run · v graph/path · q quit"
+		left = " esc close run · s next step · r run again live · n save as test · v graph/path · q quit"
 	case m.run != nil && !m.run.done && m.run.paused == "" && m.editing == editNone:
 		left = " x stop · 1-4 panes"
 	case m.pausedRun():

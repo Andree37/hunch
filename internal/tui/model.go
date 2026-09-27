@@ -119,6 +119,7 @@ type Model struct {
 	runCursor   int
 	showRuns    bool       // pane 2 lists runs instead of test cases
 	replay      *trace.Run // recorded run shown in the views
+	beforeRun   *snapshot  // what the views showed before a run was opened
 	replayK     int        // how many of its steps are shown
 	live        bool       // http nodes really send; off by default
 
@@ -344,6 +345,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.flash = ""
 	switch msg.String() {
+	case "esc":
+		if m.replaying() {
+			m.closeRun()
+		}
 	case "q", "ctrl+c":
 		if m.cancel != nil {
 			m.cancel()
@@ -451,7 +456,11 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.focus == focusInputs && len(m.inputs) > 0:
 			return m, m.editInput()
 		case m.focus == focusTests && m.showRuns && len(m.runs) > 0:
-			m.openRun(m.runCursor)
+			if m.replay == m.runs[m.runCursor] {
+				m.closeRun() // Enter on the open run closes it
+			} else {
+				m.openRun(m.runCursor)
+			}
 		case m.focus == focusTests && !m.showRuns && len(m.cases) > 0:
 			m.replay = nil
 			m.useCase(m.caseCursor)
@@ -694,7 +703,7 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 	if m.run != nil && m.run.done && m.run.err == nil {
 		m.prev = m.run
 	}
-	m.replay = nil
+	m.replay, m.beforeRun = nil, nil
 	m.runID++
 	id := m.runID
 	m.run = &run{events: map[string]runner.Event{}, started: time.Now(), caseIdx: -1}

@@ -806,3 +806,35 @@ func TestPickerOpensAFlowAndComesBack(t *testing.T) {
 		t.Errorf("F should go back to the picker")
 	}
 }
+
+func TestCloseARun(t *testing.T) {
+	runs := recordRuns(t, map[string]any{"sender": "carol", "message": "hi"}, map[string]any{"sender": "bob", "message": "yo"})
+	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "me", "message": "typed"}, "mock", false)
+	m.SetRuns(runs)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 44})
+	m.Update(press("2"))
+
+	m.Update(press("enter"))
+	if !m.replaying() || m.inputs[1].value != "bob" {
+		t.Fatalf("open: replaying=%v inputs=%v", m.replaying(), m.inputs)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.replaying() || m.run != nil || m.inputs[0].value != "typed" || m.inputs[1].value != "me" {
+		t.Errorf("esc should close and restore: replaying=%v run=%v inputs=%v", m.replaying(), m.run, m.inputs)
+	}
+	if strings.Contains(ansi.Strip(m.View()), "replay ") {
+		t.Error("status bar still shows a replay")
+	}
+
+	// Enter on the open run closes it; on another run switches to it.
+	m.Update(press("enter"))
+	m.Update(press("j"))
+	m.Update(press("enter"))
+	if !m.replaying() || m.inputs[1].value != "carol" {
+		t.Fatalf("switch: inputs=%v", m.inputs)
+	}
+	m.Update(press("enter"))
+	if m.replaying() || m.inputs[1].value != "me" {
+		t.Errorf("enter on the open run should close it: replaying=%v inputs=%v", m.replaying(), m.inputs)
+	}
+}

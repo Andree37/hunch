@@ -150,9 +150,25 @@ func (m *Model) refreshRuns() tea.Cmd {
 
 // openRun loads a recorded run: its input into the Inputs pane and all its
 // steps into the views.
+// snapshot is what the views showed before a run was opened, to go back to.
+type snapshot struct {
+	inputs     []input
+	active     int
+	dirty      bool
+	run, prev  *run
+	cursor     int
+	nodeScroll int
+}
+
 func (m *Model) openRun(i int) {
 	if m.cancel != nil {
 		m.cancel()
+	}
+	if m.replay == nil { // keep what was there before the first run opened
+		m.beforeRun = &snapshot{
+			inputs: slices.Clone(m.inputs), active: m.active, dirty: m.dirty,
+			run: m.run, prev: m.prev, cursor: m.cursor, nodeScroll: m.nodeScroll,
+		}
 	}
 	tr := m.runs[i]
 	m.inputs = nil
@@ -214,6 +230,28 @@ func (m *Model) otherRunsLines() []string {
 			sDim.Render("  hunch tui "+flow+" --runs "+m.runsPath))
 	}
 	return lines
+}
+
+// closeRun stops showing a recorded run and puts back what the views
+// showed before it was opened.
+func (m *Model) closeRun() {
+	m.replay = nil
+	if b := m.beforeRun; b != nil {
+		m.inputs, m.active, m.dirty = b.inputs, b.active, b.dirty
+		m.run, m.prev, m.cursor, m.nodeScroll = b.run, b.prev, b.cursor, b.nodeScroll
+		if m.run != nil && !m.run.done {
+			m.run = nil // a live run it interrupted can't be resumed
+		}
+	} else {
+		m.run = nil
+	}
+	m.beforeRun = nil
+	m.runID++
+	if m.flowView == viewPath && (m.run == nil || len(m.run.path) == 0) {
+		m.flowView = viewGraph
+	}
+	m.cursor = min(m.cursor, max(len(m.rows())-1, 0))
+	m.flash = "closed the run"
 }
 
 // replaying reports whether the views show a recorded run.
