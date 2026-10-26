@@ -16,8 +16,7 @@ backends:
   writer: mock
   mock: {kind: mock, seed: demo}
   jev: {kind: jev, provider: typesafe}
-  claude: {kind: anthropic, model: claude-opus-5}
-  bedrock: {kind: bedrock, model: anthropic.claude-opus-5, region: us-east-1}
+  bedrock: {kind: bedrock, model: amazon.nova-pro-v1:0, region: us-east-1}
   ollama: {kind: openai, base_url: "http://localhost:11434/v1", model: qwen2.5:0.5b}
 
 inputs:

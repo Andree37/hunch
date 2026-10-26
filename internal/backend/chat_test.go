@@ -124,24 +124,24 @@ func TestAnthropicWrite(t *testing.T) {
 		data, _ := io.ReadAll(r.Body)
 		json.Unmarshal(data, &body)
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5",
-			"content":[{"type":"text","text":"Hi from Claude"}],
+		io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"test-model",
+			"content":[{"type":"text","text":"Hi from the model"}],
 			"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}`)
 	}))
 	defer srv.Close()
 	t.Setenv("HUNCH_TEST_ANTHROPIC", "sk-test")
 
-	b, err := New(flow.BackendConfig{Name: "claude", Kind: "anthropic", Options: map[string]any{
-		"model": "claude-opus-5", "base_url": srv.URL, "api_key_env": "HUNCH_TEST_ANTHROPIC",
+	b, err := New(flow.BackendConfig{Name: "anth", Kind: "anthropic", Options: map[string]any{
+		"model": "test-model", "base_url": srv.URL, "api_key_env": "HUNCH_TEST_ANTHROPIC",
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp, err := b.(Writer).Write(context.Background(), WriteRequest{System: "sys", Prompt: "hi"})
-	if err != nil || resp.Text != "Hi from Claude" {
+	if err != nil || resp.Text != "Hi from the model" {
 		t.Fatalf("write = %+v, %v", resp, err)
 	}
-	if body["model"] != "claude-opus-5" || body["system"] == nil {
+	if body["model"] != "test-model" || body["system"] == nil {
 		t.Errorf("body = %v", body)
 	}
 }
@@ -149,13 +149,13 @@ func TestAnthropicWrite(t *testing.T) {
 func TestAnthropicRefusalIsAnError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5","content":[],
+		io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"test-model","content":[],
 			"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber"},"usage":{"input_tokens":1,"output_tokens":0}}`)
 	}))
 	defer srv.Close()
 	t.Setenv("HUNCH_TEST_ANTHROPIC", "sk-test")
-	b, _ := New(flow.BackendConfig{Name: "claude", Kind: "anthropic", Options: map[string]any{
-		"model": "claude-opus-5", "base_url": srv.URL, "api_key_env": "HUNCH_TEST_ANTHROPIC",
+	b, _ := New(flow.BackendConfig{Name: "anth", Kind: "anthropic", Options: map[string]any{
+		"model": "test-model", "base_url": srv.URL, "api_key_env": "HUNCH_TEST_ANTHROPIC",
 	}})
 	_, err := b.(Writer).Write(context.Background(), WriteRequest{Prompt: "x"})
 	if err == nil || !strings.Contains(err.Error(), "declined") {

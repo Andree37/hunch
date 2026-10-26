@@ -108,9 +108,9 @@ under its node name, so later nodes can use it.
 ```yaml
 backends:
   default: jev          # decides
-  writer: claude        # writes, for llm nodes
+  writer: local         # writes, for llm nodes
   jev: {kind: jev}
-  claude: {kind: anthropic, model: claude-opus-5}
+  local: {kind: openai, base_url: "http://localhost:11434/v1", model: "qwen2.5:1.5b"}
 
 nodes:
   draft:
@@ -388,7 +388,7 @@ aren't calibrated the way Jev's are.
 | `mock` | ✓ | ✓ | Deterministic, offline. `answers: {node: value}` forces answers. |
 | `jev` | ✓ | | TypeSafe's Jev via `provider: typesafe` (`$TYPESAFE_API_KEY`) or `openrouter` (`$OPENROUTER_API_KEY`). |
 | `openai` | ✓ | ✓ | Any OpenAI-compatible server: OpenAI, Ollama (`base_url: http://localhost:11434/v1`), OpenRouter, vLLM, LM Studio. `model`, `base_url`, `api_key_env` (default `OPENAI_API_KEY`). |
-| `anthropic` | ✓ | ✓ | Claude via the Anthropic API. `model` (e.g. `claude-opus-5`), `api_key_env` (default `ANTHROPIC_API_KEY`), `base_url`. |
+| `anthropic` | ✓ | ✓ | Models via the Anthropic API. `model` (the model ID), `api_key_env` (default `ANTHROPIC_API_KEY`), `base_url`. |
 | `bedrock` | ✓ | ✓ | Any Amazon Bedrock model via the Converse API. `model` (model or inference profile ID), `region`, `profile`; AWS credentials from the usual chain. |
 
 Routing on confidence (`unsure`, `threshold`) is most meaningful with Jev.

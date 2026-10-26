@@ -14,7 +14,7 @@ import (
 )
 
 // bedrockChat calls any Amazon Bedrock model through the Converse API, so
-// Claude, Llama, Nova, Mistral and the rest all work the same way. AWS
+// Llama, Nova, Mistral and the rest all work the same way. AWS
 // credentials come from the usual chain (env, profile, SSO, role). Options:
 //
 //	model:   required, a Bedrock model or inference profile ID

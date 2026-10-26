@@ -12,9 +12,9 @@ import (
 	"github.com/Andree37/hunch/internal/flow"
 )
 
-// anthropicChat calls Claude through the Anthropic API. Options:
+// anthropicChat calls a model through the Anthropic API. Options:
 //
-//	model:       required, e.g. claude-opus-5
+//	model:       required, the model ID
 //	api_key_env: default ANTHROPIC_API_KEY
 //	base_url:    override the API endpoint, e.g. for a proxy
 type anthropicChat struct {
@@ -27,7 +27,7 @@ func newAnthropic(cfg flow.BackendConfig) (*chatBackend, error) {
 	o := cfg.Options
 	model := optString(o, "model", "")
 	if model == "" {
-		return nil, fmt.Errorf("backend %q: model is required (e.g. claude-opus-5)", cfg.Name)
+		return nil, fmt.Errorf("backend %q: model is required (the model ID)", cfg.Name)
 	}
 	var opts []option.RequestOption
 	if key := os.Getenv(optString(o, "api_key_env", "ANTHROPIC_API_KEY")); key != "" {

@@ -6,9 +6,9 @@ func TestParseActions(t *testing.T) {
 	f, err := Parse([]byte(`
 backends:
   default: jev
-  writer: claude
+  writer: words
   jev: {kind: jev}
-  claude: {kind: anthropic, model: claude-opus-5}
+  words: {kind: anthropic, model: test-model}
   local: {kind: openai, model: llama3}
 nodes:
   draft:
@@ -41,7 +41,7 @@ nodes:
 	if draft.Prompt != "Reply to {{message}}" || draft.System == "" || draft.MaxTokens != 300 {
 		t.Errorf("draft = %+v", draft)
 	}
-	if f.BackendFor(f.Node("draft")) != "claude" || f.BackendFor(f.Node("other")) != "local" {
+	if f.BackendFor(f.Node("draft")) != "words" || f.BackendFor(f.Node("other")) != "local" {
 		t.Errorf("writer backends: draft=%q other=%q", f.BackendFor(f.Node("draft")), f.BackendFor(f.Node("other")))
 	}
 	post := f.Node("post").Action
