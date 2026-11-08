@@ -5,7 +5,7 @@ Decision flows in YAML. You write the questions a model should answer
 it: it asks, branches on the answer **and on how sure the model is**, and
 does the work at the end (call an API, run a command, write a reply).
 
-![hunch tui](docs/demo/hello-tui.gif)
+![hunch tui](docs/demo/hello-tui-2026-11-08.gif)
 
 ## Install
 
@@ -70,7 +70,7 @@ run yet.
 hunch run examples/hello.yaml --backend jev --set message="Can we sync Thursday?"
 ```
 
-![hunch run](docs/demo/hello-run.gif)
+![hunch run](docs/demo/hello-run-2026-11-08.gif)
 
 Inputs come from `--set name=value`, or from a test case with `--case NAME`.
 `--json` prints everything the run produced, for scripts.
@@ -94,7 +94,7 @@ expect:
 hunch test examples/hello.yaml --backend jev
 ```
 
-![hunch test](docs/demo/hello-test.gif)
+![hunch test](docs/demo/hello-test-2026-11-08.gif)
 
 Run them after changing a question, or with another `--backend`, to see what
 got better or worse.
