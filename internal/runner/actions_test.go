@@ -273,3 +273,61 @@ func TestFakeHTTPResponses(t *testing.T) {
 		t.Errorf("faked error status: %v", err)
 	}
 }
+
+// A $NAME inside an input or a model's answer must not be expanded from the
+// environment: only $VARS written in the flow itself are.
+func TestHTTPRefsNeverExpandEnv(t *testing.T) {
+	var gotURL, gotHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL, gotHeader = r.URL.String(), r.Header.Get("X-Who")
+	}))
+	defer srv.Close()
+	t.Setenv("HUNCH_TEST_SECRET", "s3cret")
+	t.Setenv("HUNCH_TEST_TOKEN", "tok")
+
+	_, err := runFlow(t, `
+nodes:
+  get:
+    action: http
+    method: GET
+    url: "{{base}}/x/{{id}}?k=$HUNCH_TEST_TOKEN"
+    headers: {X-Who: "{{who}} $HUNCH_TEST_TOKEN"}
+`, map[string]any{"base": srv.URL, "id": "$HUNCH_TEST_SECRET", "who": "${HUNCH_TEST_SECRET}"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(gotURL+gotHeader, "s3cret") {
+		t.Errorf("secret expanded from a ref: url=%q header=%q", gotURL, gotHeader)
+	}
+	if !strings.Contains(gotURL, "k=tok") || gotHeader != "${HUNCH_TEST_SECRET} tok" {
+		t.Errorf("flow's own $VARS not expanded: url=%q header=%q", gotURL, gotHeader)
+	}
+}
+
+// Secrets from $VARS in a URL stay out of state and error messages.
+func TestHTTPURLSecretsStayOutOfStateAndErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(422)
+	}))
+	defer srv.Close()
+	t.Setenv("HUNCH_TEST_KEY", "s3cret")
+	src := `nodes: {post: {action: http, url: "{{base}}/hook?key=$HUNCH_TEST_KEY"}}`
+	in := map[string]any{"base": srv.URL}
+
+	res, err := runFlow(t, src, in, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u := res.State["post"].(map[string]any)["url"].(string); strings.Contains(u, "s3cret") || !strings.Contains(u, "$HUNCH_TEST_KEY") {
+		t.Errorf("dry-run url = %q", u)
+	}
+
+	_, err = runFlow(t, src, in, false)
+	if err == nil || strings.Contains(err.Error(), "s3cret") {
+		t.Errorf("live error = %v", err)
+	}
+	_, err = runFlow(t, `nodes: {post: {action: http, url: "http://127.0.0.1:1/x?key=$HUNCH_TEST_KEY", retries: 0}}`, nil, false)
+	if err == nil || strings.Contains(err.Error(), "s3cret") {
+		t.Errorf("network error = %v", err)
+	}
+}

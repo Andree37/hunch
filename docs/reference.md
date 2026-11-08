@@ -138,7 +138,9 @@ nodes:
   since they only read and later nodes need the data. Use `hunch test --live` or `L` in the TUI to send
   for real. `hunch run` sends unless given `--dry-run`.
 - **Secrets** go in `$VARS` in `url` and `headers`, read from the environment,
-  so they never enter state or any model's prompt. Refs in a URL are escaped.
+  so they never enter state or any model's prompt. Only `$VARS` written in
+  the flow are expanded: a `$NAME` inside an input or an answer stays as it is.
+  Refs in a URL are escaped.
 - A `body` map is sent as JSON; a ref that is the whole value keeps its type.
 - **Retries** never risk doing something twice: GET/PUT/DELETE retry network
   errors, 429 and 5xx; POST/PATCH only retry 429 and 503 (not processed)

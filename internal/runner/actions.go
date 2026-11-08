@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,12 +52,13 @@ func llmNode(ctx context.Context, f *flow.Flow, n *flow.Node, state map[string]a
 
 // httpNode calls an API. Refs in the URL are escaped for where they sit;
 // $VARS in the URL and headers come from the environment (so secrets stay
-// out of state and out of every prompt). In a dry run, GETs still happen
+// out of state and out of every prompt); only the flow's own text is
+// expanded, never a value a ref brings in. In a dry run, GETs still happen
 // (they only read, and later nodes need the data) while anything that
 // writes is recorded instead of sent.
 func httpNode(ctx context.Context, n *flow.Node, state map[string]any, opts Options, ev *Event) error {
 	a := n.Action
-	rawURL, err := tmpl.RenderFunc(a.URL, state, func(v string, at int) string {
+	rawURL, shownURL, err := renderWithEnv(a.URL, state, func(v string, at int) string {
 		switch {
 		case at == 0:
 			return v // the ref is the whole base URL
@@ -67,7 +70,6 @@ func httpNode(ctx context.Context, n *flow.Node, state map[string]any, opts Opti
 	if err != nil {
 		return err
 	}
-	rawURL = os.ExpandEnv(rawURL)
 
 	body, contentType, err := renderBody(a.Body, state)
 	if err != nil {
@@ -76,12 +78,12 @@ func httpNode(ctx context.Context, n *flow.Node, state map[string]any, opts Opti
 	if fake, ok := opts.Fake[n.ID]; ok {
 		ev.Output = map[string]any{"status": fake.Status, "body": fake.Body, "faked": true}
 		if fake.Status >= 300 {
-			return fmt.Errorf("%s %s: HTTP %d (faked)", a.Method, rawURL, fake.Status)
+			return fmt.Errorf("%s %s: HTTP %d (faked)", a.Method, shownURL, fake.Status)
 		}
 		return nil
 	}
 	if opts.DryRun && a.Method != http.MethodGet {
-		out := map[string]any{"dry_run": true, "method": a.Method, "url": rawURL}
+		out := map[string]any{"dry_run": true, "method": a.Method, "url": shownURL}
 		if body != nil {
 			out["body"] = string(body)
 		}
@@ -98,11 +100,11 @@ func httpNode(ctx context.Context, n *flow.Node, state map[string]any, opts Opti
 		headers.Set("Content-Type", contentType)
 	}
 	for _, h := range a.Headers {
-		v, err := tmpl.Render(h.Value, state)
+		v, _, err := renderWithEnv(h.Value, state, nil)
 		if err != nil {
 			return err
 		}
-		headers.Set(h.Key, os.ExpandEnv(v))
+		headers.Set(h.Key, v)
 	}
 	if a.IdempotencyKey != "" {
 		key, err := tmpl.Render(a.IdempotencyKey, state)
@@ -135,6 +137,10 @@ func httpNode(ctx context.Context, n *flow.Node, state map[string]any, opts Opti
 		}
 	}
 	if err != nil {
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			ue.URL = shownURL // Go's errors quote the URL, secrets and all
+		}
 		return err
 	}
 	out := map[string]any{"status": status, "body": string(data)}
@@ -144,10 +150,41 @@ func httpNode(ctx context.Context, n *flow.Node, state map[string]any, opts Opti
 	}
 	ev.Output = out
 	if status >= 300 {
-		return fmt.Errorf("%s %s: HTTP %d: %.200s", a.Method, rawURL, status, data)
+		return fmt.Errorf("%s %s: HTTP %d: %.200s", a.Method, shownURL, status, data)
 	}
 	return nil
 }
+
+// renderWithEnv renders the refs in s and expands $VARS from the
+// environment, but only in s itself: a value substituted for a ref is never
+// expanded, so an input or a model's answer can't pull a secret out of the
+// environment by containing "$NAME". sent is what to send; shown keeps the
+// $VARS as written, for state, traces and errors.
+func renderWithEnv(s string, state map[string]any, escape func(val string, at int) string) (sent, shown string, err error) {
+	var vals []string
+	marked, err := tmpl.RenderFunc(s, state, func(v string, at int) string {
+		if escape != nil {
+			v = escape(v, at)
+		}
+		vals = append(vals, v)
+		return fmt.Sprintf("\x00%d\x00", len(vals)-1)
+	})
+	if err != nil {
+		return "", "", err
+	}
+	fill := func(t string) string {
+		return placeholderRE.ReplaceAllStringFunc(t, func(m string) string {
+			i, _ := strconv.Atoi(m[1 : len(m)-1])
+			if i < len(vals) {
+				return vals[i]
+			}
+			return m
+		})
+	}
+	return fill(os.ExpandEnv(marked)), fill(marked), nil
+}
+
+var placeholderRE = regexp.MustCompile("\x00[0-9]+\x00")
 
 // retryWait is the first retry's delay; each later one doubles it.
 var retryWait = 500 * time.Millisecond
