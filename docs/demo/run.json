@@ -1,8 +1,0 @@
-{
-  "boxes": {"out": [30, 80, 1900, 400]},
-  "shots": [
-    {"t": 0,   "caption": "`hunch run` takes the input from `--set` (or a test case with `--case`)"},
-    {"t": 4.6, "box": "out", "caption": "One line per step: the answer, how sure, and where it went next"},
-    {"t": 9.0, "caption": "The last line is the path it took and what it cost"}
-  ]
-}

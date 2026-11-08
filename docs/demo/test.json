@@ -1,7 +1,0 @@
-{
-  "boxes": {"out": [20, 60, 1300, 460]},
-  "shots": [
-    {"t": 0,   "caption": "`hunch test` runs every case in `hello.tests/` and checks the answers"},
-    {"t": 3.2, "box": "out", "caption": "✓ the model answered as the case expects. A ✗ lists what it got instead."}
-  ]
-}

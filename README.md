@@ -5,7 +5,7 @@ Decision flows in YAML. You write the questions a model should answer
 it: it asks, branches on the answer **and on how sure the model is**, and
 does the work at the end (call an API, run a command, write a reply).
 
-![hunch tui](docs/demo/hello-tui-2026-11-08-2329.gif)
+![hunch tui running examples/hello.yaml](docs/demo/tui-2026-11-08-2338.png)
 
 ## Install
 
@@ -70,8 +70,6 @@ run yet.
 hunch run examples/hello.yaml --backend jev --set message="Can we sync Thursday?"
 ```
 
-![hunch run](docs/demo/hello-run-2026-11-08.gif)
-
 Inputs come from `--set name=value`, or from a test case with `--case NAME`.
 `--json` prints everything the run produced, for scripts.
 
@@ -93,8 +91,6 @@ expect:
 ```sh
 hunch test examples/hello.yaml --backend jev
 ```
-
-![hunch test](docs/demo/hello-test-2026-11-08.gif)
 
 Run them after changing a question, or with another `--backend`, to see what
 got better or worse.
@@ -122,27 +118,10 @@ hunch tui                                      # pick a flow in this folder
 hunch tui examples/hello.yaml --backend jev    # or open one
 ```
 
-The GIF at the top is this. Four panes:
-
-| Pane | Shows |
-|---|---|
-| **1 Flow** | The flow as a tree. After a run, the path it took is green and **Outcome** says where it ended. `v` switches to just the steps that ran. |
-| **2 Tests / Runs** | The flow's test cases (✓/✗ from their last run), or its recorded runs (`t` switches). `enter` loads one. |
-| **3 Node** | The selected node: the question as it was asked, a bar per answer, confidence against the threshold, and what the previous run said. |
-| **4 Inputs** | The current input. `enter` edits a value. Expectations show ✓/✗ underneath. |
-
-| Key | Does |
-|---|---|
-| `r` | run the flow (`s` one step at a time, `x` stop) |
-| `1`–`4`, `tab` | go to a pane |
-| `j` / `k`, `enter` | move, open |
-| `v` | tree or path view |
-| `a` / `d` | add or delete an input |
-| `w` / `n` | save the inputs to this test case / as a new one |
-| `b` | switch backend |
-| `L` | live or dry run (dry runs don't send anything) |
-| `F` | back to the flow picker |
-| `q` | quit |
+Load a test case (or type an input), press `r`, and see the path the run
+took, each question as it was asked, and how sure the model was of every
+answer, as in the screenshot at the top. The keys are listed at the bottom of
+the screen.
 
 Edit the flow or a test case in your editor and the TUI reloads it.
 
@@ -232,6 +211,5 @@ Everything else (inputs and their types, what a model sees, refs, retries,
 dedupe, recording to S3, tuning thresholds) is in
 **[docs/reference.md](docs/reference.md)**.
 
-The GIFs are recorded with [VHS](https://github.com/charmbracelet/vhs) and
-captioned by `docs/demo/annotate.py`. Run `docs/demo/record.sh` to record
-them again.
+The screenshot is taken with [VHS](https://github.com/charmbracelet/vhs):
+`docs/demo/screenshot.sh`.
