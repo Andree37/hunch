@@ -397,6 +397,40 @@ nodes:
 	}
 }
 
+// r on a highlighted test runs it, without loading it with enter first.
+func TestRunHighlightedTest(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	os.WriteFile(path, []byte(`backends: {m: {kind: mock, answers: {a: yes}}}
+nodes:
+  a: {bool: "Reply to {{who}}?", then: {yes: b, no: b}}
+  b: {action: log, message: "{{who}}"}
+`), 0o644)
+	os.MkdirAll(filepath.Join(dir, "f.tests"), 0o755)
+	os.WriteFile(filepath.Join(dir, "f.tests", "ann.yaml"), []byte("input: {who: ann}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "f.tests", "bob.yaml"), []byte("input: {who: bob}\n"), 0o644)
+	m, err := New(path, nil, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	m.Update(press("2"))
+	m.Update(press("j")) // bob, not loaded
+	_, cmd := m.Update(press("r"))
+	drive(t, m, cmd)
+	if m.active != 1 || m.run.inputs["who"] != "bob" {
+		t.Errorf("r should run the highlighted test: active=%d inputs=%v", m.active, m.run.inputs)
+	}
+
+	// The loaded test keeps edits to its input.
+	m.inputs[0].value, m.dirty = "cy", true
+	_, cmd = m.Update(press("r"))
+	drive(t, m, cmd)
+	if m.run.inputs["who"] != "cy" {
+		t.Errorf("r on the loaded test should keep its edits: %v", m.run.inputs)
+	}
+}
+
 func TestHelp(t *testing.T) {
 	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})

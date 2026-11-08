@@ -234,7 +234,7 @@ func (m *Model) footerBar() string {
 	case m.focus == focusInputs:
 		keys = "enter edit · a add · d delete · w save test · r run · ? keys"
 	case m.focus == focusTests:
-		keys = "enter load · t tests/runs · r run · ? keys"
+		keys = "r run this · s step through it · enter load · t tests/runs · ? keys"
 	case m.focus == focusNode:
 		keys = "j/k scroll · r run · ? keys"
 	default:
@@ -266,7 +266,7 @@ func (m *Model) helpView(h int) string {
 		keys  [][2]string
 	}{
 		{"Run", [][2]string{
-			{"r", "run the flow (again)"}, {"s", "run one step at a time"}, {"x", "stop"},
+			{"r", "run the flow; on a highlighted test or recorded run, run that"}, {"s", "run one step at a time"}, {"x", "stop"},
 			{"m", "switch between the run and the map of the flow"},
 			{"b", "switch backend"}, {"L", "live or dry run: dry runs don't send http writes"},
 		}},

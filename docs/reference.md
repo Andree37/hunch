@@ -464,8 +464,8 @@ The screen reads left to right: what goes in, what happened, and why.
 - **Header**: the flow, where the input came from (a test, a recorded run, or
   typed), the backend, and dry run or LIVE. On the right, how the run went:
   how many expectations held, steps, cost and time, or what is running now.
-- **2 Tests** (top left): `✓`/`✗` from the last run of each case. `enter`
-  loads one. `t` switches to the flow's **recorded runs**, two lines each: when
+- **2 Tests** (top left): `✓`/`✗` from the last run of each case. `r` runs
+  the highlighted one (`s` steps through it); `enter` only loads it. `t` switches to the flow's **recorded runs**, two lines each: when
   and where it ended, then its input.
 - **4 Input** (bottom left): the current input. Inputs the flow reads are
   listed even if empty, and empty ones block a run. `enter` on a choice or

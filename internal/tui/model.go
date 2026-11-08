@@ -403,6 +403,7 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.nodeScroll = max(m.nodeScroll-1, 0)
 		}
 	case "r":
+		m.loadHighlighted()
 		if m.replaying() {
 			m.replay = nil // run the loaded input again, live
 			return m, m.startRun(false)
@@ -416,6 +417,9 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.startRun(false)
 	case "s":
+		if m.focus == focusTests && !m.showRuns {
+			m.loadHighlighted()
+		}
 		if m.replaying() {
 			m.stepReplay()
 			return m, nil
@@ -513,6 +517,26 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.nameCase()
 	}
 	return m, nil
+}
+
+// loadHighlighted makes r (and s) in the tests pane act on the highlighted
+// test or recorded run, so there's no need to load it with enter first. The
+// test already loaded keeps any edits made to its input.
+func (m *Model) loadHighlighted() {
+	if m.focus != focusTests || m.editing != editNone {
+		return
+	}
+	switch {
+	case m.showRuns && len(m.runs) > 0:
+		if m.replay != m.runs[m.runCursor] {
+			m.openRun(m.runCursor)
+		}
+	case !m.showRuns && len(m.cases) > 0:
+		if m.caseCursor != m.active || m.replaying() {
+			m.replay = nil
+			m.useCase(m.caseCursor)
+		}
+	}
 }
 
 // SetWriter makes llm nodes write with the named backend instead of the
