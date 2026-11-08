@@ -124,6 +124,13 @@ type Model struct {
 	live        bool       // http nodes really send; off by default
 
 	help          bool // the key list covers the screen
+
+	// Steps of a run appear one at a time, each answer's bar filling in.
+	animate  bool      // off in tests, so a finished run shows whole
+	reveal   int       // how many steps of the run are on screen
+	revealAt time.Time // when the last of them appeared
+	frame    int       // animation frame, for spinners
+	ticking  bool
 	flash         string
 	width, height int
 }
@@ -133,7 +140,7 @@ type Model struct {
 // first case's input is loaded instead. backendName overrides the flow's
 // default backend.
 func New(path string, state map[string]any, backendName string, fromCase bool) (*Model, error) {
-	m := &Model{path: path, backend: backendName, active: -1, results: map[string][]cases.Result{}}
+	m := &Model{path: path, backend: backendName, active: -1, results: map[string][]cases.Result{}, animate: animations}
 	for _, k := range slices.Sorted(maps.Keys(state)) {
 		m.inputs = append(m.inputs, input{k, tmpl.Format(state[k])})
 	}
@@ -231,7 +238,60 @@ type (
 		err   error
 	}
 	tickMsg time.Time
+	animMsg struct{}
 )
+
+// animations is turned on by Run and RunApp; models built in tests show
+// runs whole.
+var animations = false
+
+const (
+	stepDelay = 300 * time.Millisecond // between one step appearing and the next
+	barFill   = 350 * time.Millisecond // how long an answer's bar takes to fill
+)
+
+func animTick() tea.Cmd {
+	return tea.Tick(40*time.Millisecond, func(time.Time) tea.Msg { return animMsg{} })
+}
+
+// kick starts the animation ticking, unless it already is.
+func (m *Model) kick() tea.Cmd {
+	if !m.animate || m.ticking {
+		return nil
+	}
+	m.ticking = true
+	return animTick()
+}
+
+// restartReveal makes the run on screen appear again from its first step.
+func (m *Model) restartReveal() {
+	m.reveal, m.revealAt = 0, time.Now().Add(-stepDelay)
+}
+
+// shown is how many steps of the run are on screen.
+func (m *Model) shown() int {
+	if m.run == nil {
+		return 0
+	}
+	if !m.animate {
+		return len(m.run.path)
+	}
+	return min(m.reveal, len(m.run.path))
+}
+
+// fill is how far the newest step's bar has filled, 0 to 1.
+func (m *Model) fill(i int) float64 {
+	if !m.animate || i != m.shown()-1 {
+		return 1
+	}
+	p := min(float64(time.Since(m.revealAt))/float64(barFill), 1)
+	return 1 - (1-p)*(1-p) // ease out
+}
+
+// spinner turns while a step waits on the model.
+func (m *Model) spinner() string {
+	return string([]rune("◐◓◑◒")[m.frame%4])
+}
 
 func tick() tea.Cmd {
 	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
@@ -261,6 +321,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tea.Batch(tick(), refresh)
+
+	case animMsg:
+		m.frame++
+		r := m.run
+		if r != nil && m.reveal < len(r.path) && time.Since(m.revealAt) >= stepDelay {
+			m.reveal++
+			m.revealAt = time.Now()
+		}
+		busy := r != nil && (m.reveal < len(r.path) || time.Since(m.revealAt) < barFill || (!r.done && r.paused == ""))
+		if !busy {
+			m.ticking = false
+			return m, nil
+		}
+		return m, animTick()
 
 	case runsLoadedMsg:
 		m.runsLoading, m.runsMod = false, time.Now()
@@ -422,7 +496,7 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.replaying() {
 			m.stepReplay()
-			return m, nil
+			return m, m.kick()
 		}
 		if m.resumable() {
 			m.step()
@@ -474,6 +548,7 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.closeRun() // Enter on the open run closes it
 			} else {
 				m.openRun(m.runCursor)
+				return m, m.kick()
 			}
 		case m.focus == focusTests && !m.showRuns && len(m.cases) > 0:
 			m.replay = nil
@@ -741,6 +816,7 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 	m.replay, m.beforeRun = nil, nil
 	m.runID++
 	id := m.runID
+	m.restartReveal()
 	// The middle pane tells the run as it happens.
 	if m.flowView != viewPath {
 		m.flowView, m.cursor, m.nodeScroll = viewPath, 0, 0
@@ -820,7 +896,7 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 			ch <- doneMsg{id, res.State, err}
 		}
 	}()
-	return m.next()
+	return tea.Batch(m.next(), m.kick())
 }
 
 // next waits for the current run's next message.
@@ -850,6 +926,7 @@ func (m *Model) state() map[string]any {
 }
 
 func Run(m *Model) error {
+	animations, m.animate = true, true
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }

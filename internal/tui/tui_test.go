@@ -135,7 +135,7 @@ nodes:
 	_, cmd = m.Update(press("r"))
 	drive(t, m, cmd)
 	screen := ansi.Strip(m.View())
-	if !strings.Contains(screen, "✗ expected a = no, got yes") || !strings.Contains(screen, "✗ ann-asks") || !strings.Contains(screen, "✗ 0/1 expected") {
+	if !strings.Contains(screen, "✗ the test expects a = no, but got yes") || !strings.Contains(screen, "✗ ann-asks") || !strings.Contains(screen, "✗ 0/1 expected") {
 		t.Errorf("want failed expectation shown:\n%s", screen)
 	}
 
@@ -428,6 +428,47 @@ nodes:
 	drive(t, m, cmd)
 	if m.run.inputs["who"] != "cy" {
 		t.Errorf("r on the loaded test should keep its edits: %v", m.run.inputs)
+	}
+}
+
+// Starting a run with animation on starts the animation ticking.
+func TestRunStartsAnimation(t *testing.T) {
+	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
+	m.animate = true
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m.Update(press("r"))
+	if !m.ticking || m.reveal != 0 {
+		t.Errorf("r should start the reveal: ticking=%v reveal=%d", m.ticking, m.reveal)
+	}
+	m.cancel()
+}
+
+// With animation on, a run's steps appear one at a time.
+func TestStepsAppearOneAtATime(t *testing.T) {
+	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	_, cmd := m.Update(press("r"))
+	drive(t, m, cmd)
+
+	m.animate = true
+	m.restartReveal()
+	if screen := ansi.Strip(m.View()); strings.Contains(screen, "1 ● worth_it") {
+		t.Fatalf("nothing should show before the first tick:\n%s", screen)
+	}
+	m.Update(animMsg{})
+	screen := ansi.Strip(m.View())
+	if !strings.Contains(screen, "1 ● worth_it") || strings.Contains(screen, "2 ● intent") || strings.Contains(screen, "ended at") {
+		t.Fatalf("first tick should show only step 1:\n%s", screen)
+	}
+	for range len(m.run.path) {
+		m.revealAt = time.Now().Add(-time.Second)
+		m.Update(animMsg{})
+	}
+	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "5 ● schedule") || !strings.Contains(screen, "ended at schedule") {
+		t.Errorf("every step should end up shown:\n%s", screen)
+	}
+	if _, cmd := m.Update(animMsg{}); cmd != nil || m.ticking {
+		t.Error("ticking should stop once everything is shown")
 	}
 }
 

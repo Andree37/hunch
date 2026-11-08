@@ -242,6 +242,10 @@ func (a *App) View() string {
 
 // RunApp runs the TUI until it quits.
 func RunApp(a *App) error {
+	animations = true
+	if a.main != nil {
+		a.main.animate = true
+	}
 	_, err := tea.NewProgram(a, tea.WithAltScreen()).Run()
 	return err
 }

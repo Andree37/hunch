@@ -144,7 +144,11 @@ func (m *Model) headerBar() string {
 		name = m.flow.Name
 	}
 	sep := sDim.Render(" · ")
-	left := " " + sTitle.Render(name) + sep + m.sourceLabel() + sep + m.backend + sep + m.modeLabel()
+	be := m.backend
+	if m.mock() {
+		be += sYellow.Render(" (made-up answers)")
+	}
+	left := " " + sTitle.Render(name) + sep + m.sourceLabel() + sep + be + sep + m.modeLabel()
 
 	var right string
 	if r := m.run; r != nil {
@@ -158,7 +162,7 @@ func (m *Model) headerBar() string {
 		case r.paused != "":
 			right = sYellow.Render("⏸ paused") + " before " + r.paused + sDim.Render(fmt.Sprintf(" · %d steps", len(r.path)))
 		case !r.done:
-			right = sYellow.Render(fmt.Sprintf("◐ running %s %.1fs", r.current, time.Since(r.nodeAt).Seconds()))
+			right = sYellow.Render(fmt.Sprintf("%s running %s %.1fs", m.spinner(), r.current, time.Since(r.nodeAt).Seconds()))
 			if r.status != "" {
 				right += sDim.Render(" · ") + sYellow.Render(r.status)
 			}
@@ -169,6 +173,15 @@ func (m *Model) headerBar() string {
 		}
 	}
 	return bar(left, right+" ", m.width)
+}
+
+// mock reports whether the backend picked for this run makes its answers up.
+func (m *Model) mock() bool {
+	if m.flow == nil {
+		return false
+	}
+	cfg, ok := m.flow.Backends[m.backend]
+	return ok && cfg.Kind == "mock"
 }
 
 // expectSummary is "✓ 2/2 expected · " for a checked test case.
@@ -374,7 +387,8 @@ func (m *Model) storyLines(w int) (lines []string, rowLine []int) {
 	nameW = min(nameW, 18)
 	indent := strings.Repeat(" ", 6)
 
-	for i, id := range r.path {
+	shown := m.shown()
+	for i, id := range r.path[:shown] {
 		rowLine = append(rowLine, len(lines))
 		n := m.flow.Node(id)
 		marker := " "
@@ -410,7 +424,7 @@ func (m *Model) storyLines(w int) (lines []string, rowLine []int) {
 			lines = append(lines, head+m.nextMark(ev)+m.expectMark(id))
 			lines = append(lines, indent+sDim.Render(strings.Join(strings.Fields(text), " ")))
 			if ran && len(ev.Decisions) > 0 {
-				lines = append(lines, indent+m.verdict(n, q, ev.Decisions[0], ev, w-len(indent)))
+				lines = append(lines, indent+m.verdict(n, q, ev.Decisions[0], ev, w-len(indent), m.fill(i)))
 			}
 		}
 		switch {
@@ -419,11 +433,14 @@ func (m *Model) storyLines(w int) (lines []string, rowLine []int) {
 				lines = append(lines, indent+sRed.Render(l))
 			}
 		case r.current == id && !ran:
-			lines = append(lines, indent+sYellow.Render(fmt.Sprintf("◐ asking… %.1fs", time.Since(r.nodeAt).Seconds())))
+			lines = append(lines, indent+sYellow.Render(fmt.Sprintf("%s asking… %.1fs", m.spinner(), time.Since(r.nodeAt).Seconds())))
 		}
 		if n.Kind != flow.Action && n.Kind != flow.Switch {
 			lines = append(lines, "")
 		}
+	}
+	if shown < len(r.path) {
+		return lines, rowLine // the rest is still appearing
 	}
 	if r.paused != "" {
 		rowLine = append(rowLine, len(lines))
@@ -448,8 +465,11 @@ func (m *Model) storyLines(w int) (lines []string, rowLine []int) {
 	// Expectations about nodes the run never reached.
 	for _, res := range m.activeResults() {
 		if !res.OK && !slices.Contains(r.path, resultNode(res)) {
-			lines = append(lines, sRed.Render(fmt.Sprintf("✗ expected %s = %s, but %s", res.Target, res.Want, res.Got)))
+			lines = append(lines, sRed.Render(fmt.Sprintf("✗ the test expects %s = %s, but %s", res.Target, res.Want, res.Got)))
 		}
+	}
+	if m.mock() && slices.ContainsFunc(m.activeResults(), func(r cases.Result) bool { return !r.OK }) {
+		lines = append(lines, "", sDim.Render("mock makes its answers up, so tests fail on it. b switches backend."))
 	}
 	return lines, rowLine
 }
@@ -487,7 +507,7 @@ func (m *Model) inputQuote(w int) []string {
 
 // verdict is one answer with how sure the model was against the threshold,
 // fitted to w cells: "yes  ━━━━━━━┃━━──  90%".
-func (m *Model) verdict(n *flow.Node, q flow.Question, d backend.Decision, ev runner.Event, w int) string {
+func (m *Model) verdict(n *flow.Node, q flow.Question, d backend.Decision, ev runner.Event, w int, frac float64) string {
 	th := m.flow.ThresholdFor(n)
 	style := sAnswer
 	note := ""
@@ -504,8 +524,12 @@ func (m *Model) verdict(n *flow.Node, q flow.Question, d backend.Decision, ev ru
 	}
 	label := fmt.Sprintf("%-8s", answerLabel(q, d))
 	barW := min(max(w-len(label)-6-lipgloss.Width(note), 6), 30)
-	return style.Render(label) + " " + confBar(d.Confidence, th, barW, style) +
-		sDim.Render(fmt.Sprintf(" %3.0f%%", d.Confidence*100)) + note
+	if frac < 1 { // still filling in
+		note = ""
+	}
+	conf := d.Confidence * frac
+	return style.Render(label) + " " + confBar(conf, th, barW, style) +
+		sDim.Render(fmt.Sprintf(" %3.0f%%", conf*100)) + note
 }
 
 // confBar is a slider filled up to p, with a tick where the threshold
@@ -565,7 +589,7 @@ func (m *Model) expectMark(node string) string {
 		if res.OK {
 			s += sGreen.Render("  ✓")
 		} else {
-			s += sRed.Render("  ✗ expected " + res.Want)
+			s += sRed.Render("  ✗ test expects " + res.Want)
 		}
 	}
 	return s
@@ -585,7 +609,7 @@ func (m *Model) stepIcon(node string) string {
 	case r.errNode == node:
 		return sRed.Render("✗")
 	case r.current == node:
-		return sYellow.Render("◐")
+		return sYellow.Render(m.spinner())
 	}
 	return sGreen.Render("●")
 }
@@ -772,7 +796,7 @@ func (m *Model) expectLines(node string) []string {
 		if r.OK {
 			lines = append(lines, sGreen.Render("✓ ")+fmt.Sprintf("expected %s = %s", r.Target, r.Want))
 		} else {
-			lines = append(lines, sRed.Render("✗ ")+fmt.Sprintf("expected %s = %s, ", r.Target, r.Want)+sRed.Render("got "+r.Got))
+			lines = append(lines, sRed.Render("✗ ")+fmt.Sprintf("the test expects %s = %s, ", r.Target, r.Want)+sRed.Render("but got "+r.Got))
 		}
 	}
 	return lines

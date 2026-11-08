@@ -182,6 +182,7 @@ func (m *Model) openRun(i int) {
 	m.runID++ // ignore messages from any live run
 	m.replay, m.replayK = tr, len(tr.Steps)
 	m.run = replayRun(tr, m.replayK)
+	m.restartReveal()
 	if m.flowView != viewPath {
 		m.flowView, m.cursor, m.nodeScroll = viewPath, 0, 0
 	}
@@ -250,6 +251,7 @@ func (m *Model) closeRun() {
 	}
 	m.beforeRun = nil
 	m.runID++
+	m.reveal = 1 << 30 // what's put back shows whole
 	if m.flowView == viewPath && (m.run == nil || len(m.run.path) == 0) {
 		m.flowView = viewGraph
 	}
@@ -267,6 +269,7 @@ func (m *Model) stepReplay() {
 	}
 	m.replayK++
 	m.run = replayRun(m.replay, m.replayK)
+	m.reveal, m.revealAt = m.replayK-1, time.Now().Add(-stepDelay) // only the new step animates
 	if m.replayK <= len(m.replay.Steps) {
 		m.selectNode(m.replay.Steps[m.replayK-1].Node)
 	}
