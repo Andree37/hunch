@@ -123,14 +123,14 @@ type Model struct {
 	replayK     int        // how many of its steps are shown
 	live        bool       // http nodes really send; off by default
 
-	help          bool // the key list covers the screen
+	help bool // the key list covers the screen
 
 	// Steps of a run appear one at a time, each answer's bar filling in.
-	animate  bool      // off in tests, so a finished run shows whole
-	reveal   int       // how many steps of the run are on screen
-	revealAt time.Time // when the last of them appeared
-	frame    int       // animation frame, for spinners
-	ticking  bool
+	animate       bool      // off in tests, so a finished run shows whole
+	reveal        int       // how many steps of the run are on screen
+	revealAt      time.Time // when the last of them appeared
+	frame         int       // animation frame, for spinners
+	ticking       bool
 	flash         string
 	width, height int
 }
