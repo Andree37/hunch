@@ -1,0 +1,93 @@
+{
+  "boxes": {
+    "flow": [
+      40,
+      80,
+      1070,
+      560
+    ],
+    "node": [
+      1070,
+      80,
+      2362,
+      720
+    ],
+    "tests": [
+      40,
+      800,
+      1070,
+      1030
+    ],
+    "inputs": [
+      1070,
+      738,
+      2362,
+      1030
+    ],
+    "cmd": [
+      20,
+      60,
+      1300,
+      200
+    ]
+  },
+  "shots": [
+    {
+      "t": 0,
+      "caption": "`hunch tui` opens a flow so you can run it and see why it went where it did",
+      "box": "cmd"
+    },
+    {
+      "t": 3.6,
+      "caption": "Left: the flow as a tree. Right: the node you have selected."
+    },
+    {
+      "t": 5.6,
+      "box": "tests",
+      "caption": "`2` jumps to the test cases. `enter` loads one."
+    },
+    {
+      "t": 8.6,
+      "box": "inputs",
+      "caption": "Its input: the message the flow has to decide on"
+    },
+    {
+      "t": 11.1,
+      "caption": "`r` runs the flow. The model answers each question in turn."
+    },
+    {
+      "t": 12.6,
+      "box": "flow",
+      "caption": "Green is the path it took: needs a reply, wants a meeting, so reply"
+    },
+    {
+      "t": 15.8,
+      "box": "node",
+      "caption": "Each answer has a probability. Under the threshold it would go to unsure."
+    },
+    {
+      "t": 19.2,
+      "box": "inputs",
+      "caption": "The test's expectations: ✓ means the model answered as expected"
+    },
+    {
+      "t": 22.2,
+      "caption": "`j` `enter` `r`: the next test, a newsletter"
+    },
+    {
+      "t": 24.0,
+      "box": "flow",
+      "caption": "No reply needed, so it went straight to archive"
+    },
+    {
+      "t": 26.8,
+      "box": "node",
+      "caption": "The node also shows what the previous run answered"
+    },
+    {
+      "t": 30.2,
+      "box": "flow",
+      "caption": "`v` shows only the steps that ran, in order"
+    }
+  ]
+}

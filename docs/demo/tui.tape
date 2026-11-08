@@ -1,39 +1,44 @@
-Output docs/demo/hello-tui.gif
+# Model calls happen while hidden, so the timeline is the same on every
+# recording and the zooms in tui.json stay in sync.
+Output .demo/rec/tui.mp4
 Source docs/demo/settings.tape
-Set Width 1200
-Set Height 560
-Set TypingSpeed 120ms
 
 Hide
 Type "export PS1='$ ' && clear" Enter
 Show
 
-Type@40ms "hunch tui examples/hello.yaml --backend jev"
-Sleep 400ms
+Type "hunch tui examples/hello.yaml --backend jev"
+Sleep 1.5s
 Enter
-Sleep 2s
+Sleep 4s
 
-# load the "meeting" test case and run it
+# load the "meeting" test case
 Type "2"
 Sleep 500ms
 Enter
-Sleep 1s
-Type "r"
-Wait+Screen@60s /[0-9]+ steps · \$/
-Sleep 3s
-
-# the next case, "newsletter", takes the other branch
-Type "j"
-Sleep 300ms
-Enter
-Sleep 800ms
-Type "r"
 Sleep 3.5s
 
-# walk the steps
+# run it
+Type "r"
+Hide
+Wait+Screen@60s /3 steps · \$/
+Show
+Sleep 11s
+
+# the "newsletter" case goes the other way
+Type "j"
+Sleep 500ms
+Enter
+Sleep 500ms
+Type "r"
+Hide
+Wait+Screen@60s /Outcome: archive/
+Show
+Sleep 7s
+
+# path view: only what ran
 Type "1"
 Type "v"
-Sleep 1.5s
-Type "j"
-Sleep 2.5s
+Sleep 5s
+Hide
 Type "q"
