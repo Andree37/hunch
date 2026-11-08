@@ -1,0 +1,6 @@
+description: Someone needs an answer
+input:
+  message: Where did you put the slides from yesterday's review?
+expect:
+  worth_it: yes
+  intent: info

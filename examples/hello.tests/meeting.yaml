@@ -1,0 +1,6 @@
+description: A colleague wants to meet
+input:
+  message: Can we sync Thursday about the launch?
+expect:
+  worth_it: yes
+  intent: meeting

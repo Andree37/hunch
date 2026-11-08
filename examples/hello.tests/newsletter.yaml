@@ -1,0 +1,5 @@
+description: A newsletter nobody asked for
+input:
+  message: This week only, 20% off all office chairs!
+expect:
+  worth_it: no

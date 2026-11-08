@@ -10,7 +10,10 @@ trap 'rm -rf "$bin"' EXIT
 go build -o "$bin/hunch" "$root/cmd/hunch"
 export PATH="$bin:$PATH"
 cd "$root"
-tapes=("$@"); [ ${#tapes[@]} -eq 0 ] && tapes=(run test tui)
+# runs recorded by the demo would make the TUI open on runs instead of tests
+rm -rf examples/hello.runs
+trap 'rm -rf "$bin" examples/hello.runs' EXIT
+tapes=("$@"); [ ${#tapes[@]} -eq 0 ] && tapes=(tui test run)
 for t in "${tapes[@]}"; do
   echo "recording $t"
   vhs "$here/$t.tape"

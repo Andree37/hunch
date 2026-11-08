@@ -17,8 +17,16 @@ put `TYPESAFE_API_KEY=...` in `.env` and add `--backend jev`.
 
 ## A flow
 
+[`examples/hello.yaml`](examples/hello.yaml):
+
 ```yaml
-name: inbox
+name: hello
+
+backends:
+  default: mock                         # offline, deterministic
+  mock: {kind: mock, seed: demo}
+  jev: {kind: jev, provider: typesafe}  # --backend jev, needs TYPESAFE_API_KEY
+
 nodes:
   worth_it:
     bool: "Does this message need a reply? {{message}}"
@@ -37,20 +45,27 @@ nodes:
 ## Run it
 
 ```sh
-hunch run examples/inbox.yaml --backend jev \
-  --set sender=boss --set channel=email --set vip=yes \
-  --set message="Can we sync Thursday? Need your numbers before the board meeting."
+hunch run examples/hello.yaml --backend jev --set message="Can we sync Thursday?"
 ```
 
 ![hunch run](docs/demo/run.gif)
 
 ## Test it
 
-Test cases sit next to the flow (`inbox.yaml` → `inbox.tests/`) and say what
+Test cases sit next to the flow (`hello.yaml` → `hello.tests/`) and say what
 each answer should be. Run them to compare models or catch regressions.
 
+```yaml
+# examples/hello.tests/meeting.yaml
+input:
+  message: Can we sync Thursday about the launch?
+expect:
+  worth_it: yes
+  intent: meeting
+```
+
 ```sh
-hunch test examples/triage.yaml
+hunch test examples/hello.yaml --backend jev
 ```
 
 ![hunch test](docs/demo/test.gif)
@@ -58,16 +73,16 @@ hunch test examples/triage.yaml
 ## Explore it
 
 ```sh
-hunch tui
+hunch tui examples/hello.yaml --backend jev
 ```
 
-Pick a flow, load a test case or a recorded run, press `r`. See the path it
-took, every question as asked, and the probability behind each answer.
+Load a test case, press `r`, and see the path it took, each question as asked,
+and the probability behind each answer (the GIF at the top).
 
 ## Hook it up
 
 ```sh
-hunch serve examples/triage.yaml   # runs the flow on every POST
+hunch serve examples/hello.yaml   # runs the flow on every POST
 ```
 
 Every run is recorded next to the flow, and can be replayed in the TUI or
@@ -77,7 +92,8 @@ saved as a test case.
 
 | Flow | What it does |
 |---|---|
-| [`inbox.yaml`](examples/inbox.yaml) | Triage an incoming message. |
+| [`hello.yaml`](examples/hello.yaml) | The flow above. |
+| [`inbox.yaml`](examples/inbox.yaml) | Triage an incoming message, with scores and several questions at once. |
 | [`respond.yaml`](examples/respond.yaml) | Draft a reply, check it, send it or hand it to a person. |
 | [`triage.yaml`](examples/triage.yaml) | Route and re-grade support tickets from a webhook ([demo](examples/ticketdesk)). |
 

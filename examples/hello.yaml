@@ -1,0 +1,25 @@
+# The smallest useful flow: does a message need a reply, and what kind?
+#
+#   hunch run examples/hello.yaml --set message="Can we sync Thursday?"
+#   hunch test examples/hello.yaml --backend jev
+#   hunch tui examples/hello.yaml
+name: hello
+
+backends:
+  default: mock                         # offline, deterministic
+  mock: {kind: mock, seed: demo}
+  jev: {kind: jev, provider: typesafe}  # --backend jev, needs TYPESAFE_API_KEY
+
+nodes:
+  worth_it:
+    bool: "Does this message need a reply? {{message}}"
+    then: {yes: intent, no: archive, unsure: ask_me}   # unsure = low confidence
+
+  intent:
+    choice: "What do they want?"
+    options: [meeting, info, sales]
+    then: {sales: archive, _: reply}
+
+  reply:   {action: log, message: "Reply to: {{message}}"}
+  archive: {action: log, message: Archived.}
+  ask_me:  {action: log, message: "Not sure, you decide."}
