@@ -4,7 +4,7 @@ Decision flows in YAML. Ask a model typed questions (yes/no, pick one, score
 1–5), branch on the answer **and how sure it is**, then act: call an API, run a
 command, write a reply.
 
-![hunch tui](docs/demo/tui.gif)
+![hunch tui](docs/demo/hello-tui.gif)
 
 ## Install
 
@@ -48,7 +48,7 @@ nodes:
 hunch run examples/hello.yaml --backend jev --set message="Can we sync Thursday?"
 ```
 
-![hunch run](docs/demo/run.gif)
+![hunch run](docs/demo/hello-run.gif)
 
 ## Test it
 
@@ -68,7 +68,7 @@ expect:
 hunch test examples/hello.yaml --backend jev
 ```
 
-![hunch test](docs/demo/test.gif)
+![hunch test](docs/demo/hello-test.gif)
 
 ## Explore it
 

@@ -1,4 +1,4 @@
-Output docs/demo/run.gif
+Output docs/demo/hello-run.gif
 Source docs/demo/settings.tape
 Set Height 240
 

@@ -1,4 +1,4 @@
-Output docs/demo/test.gif
+Output docs/demo/hello-test.gif
 Source docs/demo/settings.tape
 Set Height 240
 

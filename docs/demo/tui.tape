@@ -1,4 +1,4 @@
-Output docs/demo/tui.gif
+Output docs/demo/hello-tui.gif
 Source docs/demo/settings.tape
 Set Width 1200
 Set Height 560
