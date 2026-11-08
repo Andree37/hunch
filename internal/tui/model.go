@@ -123,6 +123,7 @@ type Model struct {
 	replayK     int        // how many of its steps are shown
 	live        bool       // http nodes really send; off by default
 
+	help          bool // the key list covers the screen
 	flash         string
 	width, height int
 }
@@ -344,7 +345,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.flash = ""
+	if m.help {
+		m.help = false
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+		return m, nil
+	}
 	switch msg.String() {
+	case "?":
+		m.help = true
 	case "esc":
 		if m.replaying() {
 			m.closeRun()
@@ -422,7 +432,7 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.run.elapsed = time.Since(m.run.started)
 			m.flash = "stopped"
 		}
-	case "v":
+	case "m", "v":
 		// Keep the same node selected across views.
 		var id string
 		if n := m.selected(); n != nil {
@@ -430,7 +440,7 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.flowView == viewGraph {
 			if m.run == nil || len(m.run.path) == 0 {
-				m.flash = "run first to see its path"
+				m.flash = "run first: r"
 				return m, nil
 			}
 			m.flowView = viewPath
@@ -541,7 +551,8 @@ func (m *Model) editInput() tea.Cmd {
 	}
 	m.editing = editValue
 	m.editor.SetValue(m.inputs[m.inputCursor].value)
-	m.editor.SetWidth(max(m.width*55/100-8, 10))
+	m.editor.SetWidth(max(m.width-6, 10))
+	m.editor.SetHeight(max(m.height-9, 3))
 	return m.editor.Focus()
 }
 
@@ -706,6 +717,10 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 	m.replay, m.beforeRun = nil, nil
 	m.runID++
 	id := m.runID
+	// The middle pane tells the run as it happens.
+	if m.flowView != viewPath {
+		m.flowView, m.cursor, m.nodeScroll = viewPath, 0, 0
+	}
 	m.run = &run{events: map[string]runner.Event{}, started: time.Now(), caseIdx: -1}
 	if m.active >= 0 && !m.dirty {
 		m.run.caseIdx = m.active

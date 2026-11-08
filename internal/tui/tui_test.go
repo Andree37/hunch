@@ -61,7 +61,7 @@ func TestRunAndPoke(t *testing.T) {
 		t.Fatal(m.run.err)
 	}
 	screen := ansi.Strip(m.View())
-	for _, want := range []string{"●  YES/NO  worth_it", "YES 95%", "CHOICE  intent", "[favor]", "▰▰▰▱▱ 3.28", "5 steps", "confidence 0.95"} {
+	for _, want := range []string{"1 ● worth_it", "yes ", " 95%", "2 ● intent", "favor ", "under threshold", "urgency 2.6 · formal no", "5 steps", "Sure enough: 0.95 against a threshold of"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("screen missing %q:\n%s", want, screen)
 		}
@@ -121,7 +121,7 @@ nodes:
 	if err != nil || !strings.Contains(string(saved), "input:\n  who: ann\nexpect:\n  a: yes\n") {
 		t.Fatalf("saved case = %q, %v", saved, err)
 	}
-	if m.active != 0 || m.dirty || !strings.Contains(ansi.Strip(m.View()), "Inputs · test ann-asks") {
+	if m.active != 0 || m.dirty || !strings.Contains(ansi.Strip(m.View()), "test ann-asks") {
 		t.Errorf("new case should be active: active=%d dirty=%v", m.active, m.dirty)
 	}
 
@@ -135,7 +135,7 @@ nodes:
 	_, cmd = m.Update(press("r"))
 	drive(t, m, cmd)
 	screen := ansi.Strip(m.View())
-	if !strings.Contains(screen, "✗ a = no got yes") || !strings.Contains(screen, "✗ ann-asks") {
+	if !strings.Contains(screen, "✗ expected a = no, got yes") || !strings.Contains(screen, "✗ ann-asks") || !strings.Contains(screen, "✗ 0/1 expected") {
 		t.Errorf("want failed expectation shown:\n%s", screen)
 	}
 
@@ -177,7 +177,7 @@ func TestStepThroughRun(t *testing.T) {
 	if len(m.run.events) != 1 || m.run.paused != "intent" {
 		t.Fatalf("after first step: events=%d paused=%q", len(m.run.events), m.run.paused)
 	}
-	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "●  YES/NO  worth_it") || !strings.Contains(screen, "⏸  CHOICE  intent") || !strings.Contains(screen, "next: intent") {
+	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "1 ● worth_it") || !strings.Contains(screen, "2 ⏸ intent") || !strings.Contains(screen, "paused before intent") {
 		t.Errorf("want paused marker:\n%s", screen)
 	}
 
@@ -271,7 +271,7 @@ nodes:
 	}
 
 	screen := ansi.Strip(m.View())
-	for _, want := range []string{"slack ▾", "YES", "3  1–5"} {
+	for _, want := range []string{"slack ▾", "yes ▾", "3  1–5"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("screen missing %q:\n%s", want, screen)
 		}
@@ -310,8 +310,8 @@ func TestSlowNodeShowsTimerAndRetries(t *testing.T) {
 	m.Update(startMsg{m.runID, "intent"})
 	m.run.nodeAt = time.Now().Add(-12 * time.Second)
 	m.Update(statusMsg{m.runID, "Jev overloaded (529), retrying in 2s (attempt 3/4)"})
-	bar := ansi.Strip(m.statusBar())
-	for _, want := range []string{"x stop", "running intent… 12.", "Jev overloaded (529), retrying in 2s (attempt 3/4)"} {
+	bar := ansi.Strip(m.headerBar() + m.footerBar())
+	for _, want := range []string{"x stop", "running intent 12.", "Jev overloaded (529), retrying in 2s (attempt 3/4)"} {
 		if !strings.Contains(bar, want) {
 			t.Errorf("status bar missing %q: %s", want, bar)
 		}
@@ -323,47 +323,89 @@ func TestActionRowsShowSlotsThenOutput(t *testing.T) {
 	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	screen := ansi.Strip(m.View())
-	if !strings.Contains(screen, "Reply now: ⟨intent") || !strings.Contains(screen, "├─ no ▶ ○  SAY     archive ↑") {
+	if !strings.Contains(screen, "Reply now: ⟨intent") || !strings.Contains(screen, "├─ no → ○ archive  ↑ drawn above") {
 		t.Errorf("want template slots before running:\n%s", screen)
 	}
 	_, cmd := m.Update(press("r"))
 	drive(t, m, cmd)
 	screen = ansi.Strip(m.View())
-	if !strings.Contains(screen, "✓ Block time to answer carol: hi") || !strings.Contains(screen, "Outcome: schedule") {
+	if !strings.Contains(screen, "✓ Block time to answer carol: hi") || !strings.Contains(screen, "■ ended at schedule") {
 		t.Errorf("want shell output after running:\n%s", screen)
 	}
 }
 
-func TestPathView(t *testing.T) {
+func TestRunAndMapViews(t *testing.T) {
 	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	if m.Update(press("v")); m.flowView != viewGraph || m.flash != "run first to see its path" {
-		t.Fatalf("v before a run: view=%v flash=%q", m.flowView, m.flash)
+	if m.Update(press("m")); m.flowView != viewGraph || m.flash != "run first: r" {
+		t.Fatalf("m before a run: view=%v flash=%q", m.flowView, m.flash)
 	}
+	// A run shows itself as a story: each step, its question and answer.
 	_, cmd := m.Update(press("r"))
 	drive(t, m, cmd)
-	m.Update(press("j")) // intent, in the tree
-	m.Update(press("v"))
-	if m.flowView != viewPath || m.selected().ID != "intent" {
-		t.Fatalf("path view should keep intent selected, got view=%v sel=%q", m.flowView, m.selected().ID)
+	if m.flowView != viewPath {
+		t.Fatalf("a run should show the run, view=%v", m.flowView)
 	}
+	m.Update(press("j")) // intent
 	screen := ansi.Strip(m.View())
 	for _, want := range []string{
-		"Flow · path", "Result  schedule", "✓ Block time to answer carol: hi",
-		" 1 ●  YES/NO  worth_it", "Does this message from carol need a response from me?",
-		" 5 ●  SHELL   schedule", "CHOICE  intent       favor 48%",
+		"1 Run", "message: hi", "1 ● worth_it  → intent", "Does this message from carol need a response",
+		"5 ● schedule", "■ ended at schedule", "✓ Block time to answer carol: hi",
+		"3 intent  choice · mock · threshold 0.60", "Under the 0.60 threshold (0.48), but there's no unsure",
 	} {
 		if !strings.Contains(screen, want) {
-			t.Errorf("path view missing %q:\n%s", want, screen)
+			t.Errorf("run view missing %q:\n%s", want, screen)
 		}
 	}
-	// The skipped endings aren't in the path.
+	// The skipped endings aren't in the run.
 	if strings.Contains(screen, "ask_me") {
-		t.Errorf("path view should only show what ran:\n%s", screen)
+		t.Errorf("the run should only show what ran:\n%s", screen)
 	}
-	m.Update(press("v"))
+	// m flips to the map and back, keeping the selection.
+	m.Update(press("m"))
 	if m.flowView != viewGraph || m.selected().ID != "intent" {
-		t.Errorf("back to graph should keep selection, got %q", m.selected().ID)
+		t.Errorf("map should keep intent selected, got view=%v sel=%q", m.flowView, m.selected().ID)
+	}
+	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "1 Map") || !strings.Contains(screen, "unsure → · ask_me") {
+		t.Errorf("map should draw the whole flow:\n%s", screen)
+	}
+	m.Update(press("m"))
+	if m.flowView != viewPath || m.selected().ID != "intent" {
+		t.Errorf("back to the run should keep selection, got %q", m.selected().ID)
+	}
+}
+
+// A node reached from two places is only marked on the branch the run took.
+func TestMapMarksTheBranchTaken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f.yaml")
+	os.WriteFile(path, []byte(`backends: {m: {kind: mock, answers: {a: no}}}
+nodes:
+  a: {bool: "?", then: {yes: b, no: end}}
+  b: {choice: "?", options: [x, y], then: {x: end, y: end}}
+  end: {action: log, message: done}
+`), 0o644)
+	m, _ := New(path, nil, "", false)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	_, cmd := m.Update(press("r"))
+	drive(t, m, cmd)
+	m.Update(press("m"))
+	screen := ansi.Strip(m.View())
+	for _, want := range []string{"x → · end", "no → ● end"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("map missing %q:\n%s", want, screen)
+		}
+	}
+}
+
+func TestHelp(t *testing.T) {
+	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.Update(press("?"))
+	if screen := ansi.Strip(m.View()); !m.help || !strings.Contains(screen, "switch between the run and the map") {
+		t.Fatalf("? should show every key:\n%s", screen)
+	}
+	if _, cmd := m.Update(press("r")); cmd != nil || m.help {
+		t.Error("any key should close help without acting")
 	}
 }
 
@@ -381,7 +423,7 @@ nodes:
 		t.Fatal(err)
 	}
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	if bar := ansi.Strip(m.statusBar()); !strings.Contains(bar, "dry run") {
+	if bar := ansi.Strip(m.headerBar()); !strings.Contains(bar, "dry run") {
 		t.Errorf("default should be dry run: %s", bar)
 	}
 	_, cmd := m.Update(press("r"))
@@ -390,13 +432,13 @@ nodes:
 		t.Fatal(m.run.err)
 	}
 	screen := ansi.Strip(m.View())
-	for _, want := range []string{"LLM     draft", "✎ [mock text", "HTTP    send", "DRY RUN POST https://example.invalid", "OUTPUT  result", "action=sent · to=ann"} {
+	for _, want := range []string{"1 ● draft", "✎ [mock text", "3 ● send", "DRY RUN POST https://example.invalid", "4 ● result", "action=sent · to=ann"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("screen missing %q:\n%s", want, screen)
 		}
 	}
 	m.Update(press("L"))
-	if !m.live || !strings.Contains(ansi.Strip(m.statusBar()), "LIVE") {
+	if !m.live || !strings.Contains(ansi.Strip(m.headerBar()), "LIVE") {
 		t.Error("L should switch to live")
 	}
 }
@@ -413,13 +455,13 @@ func TestSwitchNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "RULE    scope  on ⟨format⟩") {
+	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "○ scope  on ⟨format⟩") {
 		t.Errorf("want rule node before run:\n%s", screen)
 	}
 	_, cmd := m.Update(press("r"))
 	drive(t, m, cmd)
 	screen := ansi.Strip(m.View())
-	for _, want := range []string{"RULE    scope  pdf", "pdf ▶ ●  OUTPUT  in", "value  pdf", "pdf ▶ → in"} {
+	for _, want := range []string{"1 ● scope  pdf  → in", "value  pdf", "● pdf → in"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("screen missing %q:\n%s", want, screen)
 		}
@@ -469,7 +511,7 @@ func TestReplayRecordedRuns(t *testing.T) {
 	}
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 44})
 	screen := ansi.Strip(m.View())
-	if !strings.Contains(screen, "[2] Runs · 2 of this flow") || !strings.Contains(screen, "message=urgent sender=boss") {
+	if !strings.Contains(screen, "Recorded runs (2)") || !strings.Contains(screen, "message=urgent sender=boss") {
 		t.Fatalf("want runs listed, newest first:\n%s", screen)
 	}
 
@@ -480,7 +522,7 @@ func TestReplayRecordedRuns(t *testing.T) {
 		t.Fatal("opening a run must not start a live one")
 	}
 	screen = ansi.Strip(m.View())
-	for _, want := range []string{"Inputs · from run", "sender   carol", "replay 5/5", "●  SHELL   schedule"} {
+	for _, want := range []string{"Input  from the run", "sender   carol", "replay 5/5", "5 ● schedule"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("opened run: missing %q:\n%s", want, screen)
 		}
@@ -491,7 +533,7 @@ func TestReplayRecordedRuns(t *testing.T) {
 	if m.replayK != 1 || m.run.paused != "intent" || len(m.run.path) != 1 {
 		t.Fatalf("after s: k=%d paused=%q path=%v", m.replayK, m.run.paused, m.run.path)
 	}
-	if bar := ansi.Strip(m.statusBar()); !strings.Contains(bar, "replay 1/5") {
+	if bar := ansi.Strip(m.headerBar()); !strings.Contains(bar, "replay 1/5") {
 		t.Errorf("status: %s", bar)
 	}
 	m.Update(press("s"))
@@ -514,7 +556,7 @@ func TestReplayShowsRecordedFailure(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	m.Update(press("2"))
 	m.Update(press("enter"))
-	if m.run.errNode != "worth_it" || !strings.Contains(ansi.Strip(m.View()), "✗  YES/NO  worth_it") {
+	if m.run.errNode != "worth_it" || !strings.Contains(ansi.Strip(m.View()), "1 ✗ worth_it") {
 		t.Errorf("errNode=%q\n%s", m.run.errNode, ansi.Strip(m.View()))
 	}
 }
@@ -529,7 +571,7 @@ func TestReplayShowsRecordedBackend(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	m.Update(press("2"))
 	m.Update(press("enter"))
-	if title := ansi.Strip(m.nodeTitle()); !strings.Contains(title, "worth_it · jev") {
+	if title := ansi.Strip(m.stepTitle()); !strings.Contains(title, "worth_it  yes/no question · jev") {
 		t.Errorf("title = %q, want the recorded backend", title)
 	}
 }
@@ -662,10 +704,8 @@ func TestReplayedActionsShowTheirResults(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	m.Update(press("2"))
 	m.Update(press("enter"))
-	m.Update(press("1"))
-	m.Update(press("v"))
 	screen := ansi.Strip(m.View())
-	for _, want := range []string{"HTTP    post         ✓ 201", "OUTPUT  done         action=sent"} {
+	for _, want := range []string{"1 ● post  ✓ 201 POST", "2 ● done  action=sent"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("missing %q:\n%s", want, screen)
 		}
@@ -681,8 +721,8 @@ func TestRunsOfOtherFlowsAreHidden(t *testing.T) {
 	m.SetRuns(runs)
 	m.Update(tea.WindowSizeMsg{Width: 170, Height: 40})
 	screen := ansi.Strip(m.View())
-	if len(m.runs) != 0 || !strings.Contains(screen, "Runs · 0 of this flow") ||
-		!strings.Contains(screen, "1 run(s) of testdata/inbox.yaml hidden") || !strings.Contains(screen, "hunch tui testdata/inbox.yaml --runs") {
+	if len(m.runs) != 0 || !strings.Contains(screen, "Recorded runs (0)") ||
+		!strings.Contains(screen, "1 run(s) of testdata/inbox.yaml") || !strings.Contains(screen, "hunch tui testdata/inbox.yaml --runs") {
 		t.Errorf("runs of another flow should be hidden and pointed to:\n%s", screen)
 	}
 
@@ -797,7 +837,7 @@ func TestPickerOpensAFlowAndComesBack(t *testing.T) {
 		t.Fatalf("flows = %+v\n%s", a.flows, ansi.Strip(a.View()))
 	}
 	a.Update(press("enter"))
-	if a.main == nil || !strings.Contains(ansi.Strip(a.View()), "[1] Flow") {
+	if a.main == nil || !strings.Contains(ansi.Strip(a.View()), "1 Map") {
 		t.Fatalf("enter should open the flow:\n%s", ansi.Strip(a.View()))
 	}
 	_, cmd := a.Update(press("F"))

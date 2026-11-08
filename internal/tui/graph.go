@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"fmt"
+	"slices"
 
 	"github.com/Andree37/hunch/internal/flow"
 )
@@ -85,15 +85,49 @@ func (m *Model) taken(r row) bool {
 func edgeLabel(when string) string {
 	switch when {
 	case "":
-		return "▶"
+		return "→"
 	case flow.Default:
-		return "else ▶"
+		return "else →"
 	}
-	return when + " ▶"
+	return when + " →"
 }
 
-// rowLine renders one tree row: drawing, edge, status, kind badge, name and
-// the node's answer (or a reference back to where it's drawn).
+// reached reports whether the run got to this row's node by this row's
+// way in: the start node, or the branch drawn into it.
+func (m *Model) reached(r row) bool {
+	if m.run == nil {
+		return false
+	}
+	if r.parent == "" {
+		return !r.orphan && slices.Contains(m.run.path, r.node)
+	}
+	return m.taken(r)
+}
+
+// rowIcon marks a map row: reached this way, failed, running, paused,
+// skipped or not run yet.
+func (m *Model) rowIcon(row row) string {
+	r := m.run
+	reached := m.reached(row)
+	switch {
+	case r == nil:
+		return sDim.Render("○")
+	case reached && r.errNode == row.node:
+		return sRed.Render("✗")
+	case r.paused == row.node && !row.ref:
+		return sYellow.Render("⏸")
+	case reached && r.current == row.node:
+		return sYellow.Render("◐")
+	case reached:
+		return sGreen.Render("●")
+	case r.done:
+		return sDim.Render("·")
+	}
+	return sDim.Render("○")
+}
+
+// rowLine renders one map row: the tree drawing and branch, an icon, the
+// node's name and its answer (or a pointer to where it's drawn in full).
 func (m *Model) rowLine(r row, selected bool) string {
 	marker := " "
 	if selected {
@@ -105,7 +139,7 @@ func (m *Model) rowLine(r row, selected bool) string {
 	if r.parent != "" {
 		edge := r.prefix + " " + edgeLabel(r.edge) + " "
 		if m.taken(r) {
-			lead = sGreen.Render(edge)
+			lead = sDim.Render(r.prefix+" ") + sGreen.Render(edgeLabel(r.edge)+" ")
 		} else {
 			lead = sDim.Render(edge)
 		}
@@ -118,14 +152,20 @@ func (m *Model) rowLine(r row, selected bool) string {
 	}
 
 	name := r.node
-	if selected {
+	switch {
+	case selected:
 		name = sBold.Render(name)
+	case m.reached(r):
+		name = sGreen.Render(name)
 	}
-	head := fmt.Sprintf("%s%s%s %s %s", marker, lead, m.statusIcon(r.node), badge(n), name)
+	head := marker + lead + m.rowIcon(r) + " " + name
 	if r.ref {
-		return head + sDim.Render(" ↑")
+		return head + sDim.Render("  ↑ drawn above")
 	}
 	ev, ran := m.eventFor(r.node)
+	if !ran && n.Kind.IsDecision() {
+		return head + "  " + nodeDetail(n, ev, false)
+	}
 	return head + "  " + nodeDetail(n, ev, ran)
 }
 
@@ -151,59 +191,4 @@ func (m *Model) rows() []row {
 // closeCall reports whether a decision only just cleared its threshold.
 func (m *Model) closeCall(n *flow.Node, conf float64) bool {
 	return conf < m.flow.ThresholdFor(n)+0.1
-}
-
-// pathLines tells the last run as a numbered story: the result first, then
-// each step with its answer and, beneath, the question as it was asked.
-func (m *Model) pathLines() (lines []string, rowLine []int) {
-	r := m.run
-	last := r.path[len(r.path)-1]
-	switch {
-	case !r.done:
-		lines = append(lines, sYellow.Render("Running…"), "")
-	case r.err != nil:
-		lines = append(lines, sRed.Render("Failed at "+r.errNode), sRed.Render(r.err.Error()), "")
-	default:
-		lines = append(lines, sBold.Render("Result  ")+last)
-		if n := m.flow.Node(last); n != nil && n.Kind == flow.Action {
-			ev, _ := m.eventFor(last)
-			lines = append(lines, nodeDetail(n, ev, true))
-		}
-		lines = append(lines, "")
-	}
-
-	for i, id := range r.path {
-		rowLine = append(rowLine, len(lines))
-		n := m.flow.Node(id)
-		if n == nil {
-			continue
-		}
-		marker := " "
-		name := fmt.Sprintf("%-12s", id)
-		if i == m.cursor {
-			marker, name = sTitle.Render("▸"), sBold.Render(name)
-		}
-		ev, ran := m.eventFor(id)
-		head := fmt.Sprintf("%s%2d %s %s %s", marker, i+1, m.statusIcon(id), badge(n), name)
-		if ran && n.Kind == flow.Action {
-			head += " " + nodeDetail(n, ev, true)
-		}
-		if ran && n.Kind != flow.Action {
-			detail := nodeDetail(n, ev, true)
-			// The story needs the answer, not every option it beat.
-			if n.Kind == flow.Choice && len(ev.Decisions) > 0 {
-				d := ev.Decisions[0]
-				detail = compactAnswer(n.Questions[0], d) + sDim.Render(fmt.Sprintf(" %.0f%%", d.Confidence*100))
-			}
-			head += " " + detail
-			if n.Kind != flow.Questions && len(ev.Decisions) > 0 && m.closeCall(n, ev.Decisions[0].Confidence) {
-				head += sYellow.Render("  ⚠ close call")
-			}
-		}
-		lines = append(lines, head)
-		if ran && n.Kind != flow.Questions && len(ev.Asked) > 0 {
-			lines = append(lines, "      "+sDim.Render(ev.Asked[0]))
-		}
-	}
-	return lines, rowLine
 }

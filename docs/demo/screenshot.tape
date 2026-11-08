@@ -3,8 +3,8 @@
 Output .demo/rec/screenshot.gif
 Set Shell zsh
 Set FontSize 32
-Set Width 2400
-Set Height 1120
+Set Width 2800
+Set Height 1300
 Set Padding 40
 Set Theme "Catppuccin Mocha"
 Set WindowBar Colorful
@@ -18,7 +18,9 @@ Sleep 300ms
 Enter
 Sleep 500ms
 Type "r"
-Wait+Screen@60s /Outcome:/
+Wait+Screen@60s /ended at/
+Type "1"
+Sleep 200ms
 Show
 Sleep 500ms
 Screenshot .demo/rec/screenshot.png

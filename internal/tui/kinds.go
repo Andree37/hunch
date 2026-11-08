@@ -13,48 +13,33 @@ import (
 	"github.com/Andree37/hunch/internal/tmpl"
 )
 
-// Each node kind gets its own colour and badge, so the flow reads at a glance.
-var (
-	pink   = lipgloss.Color("#FF69B4")
-	orange = lipgloss.Color("#FFA07A")
-	blue   = lipgloss.Color("#74B9FF")
-	violet = lipgloss.Color("#9B8CFF")
-	white  = lipgloss.Color("#DDD6FE")
-	slate  = lipgloss.Color("#A0AEC0")
+var sSlot = lipgloss.NewStyle().Foreground(lilac).Italic(true)
 
-	sInk  = lipgloss.NewStyle().Foreground(lipgloss.Color("#1A202C")).Bold(true)
-	sSlot = lipgloss.NewStyle().Foreground(lilac).Italic(true)
-)
-
-func kindStyle(n *flow.Node) (label string, c lipgloss.Color) {
+// kindName says what sort of node this is, in the words a flow uses.
+func kindName(n *flow.Node) string {
 	switch n.Kind {
 	case flow.Bool:
-		return "YES/NO", cyan
+		return "yes/no question"
 	case flow.Choice:
-		return "CHOICE", pink
+		return "choice"
 	case flow.Score:
-		return "SCORE", orange
+		return "score"
 	case flow.Questions:
-		return "MULTI", blue
+		return "several questions"
 	case flow.Switch:
-		return "RULE", slate
+		return "rule"
 	}
 	switch n.Action.Type {
 	case flow.ActShell:
-		return "SHELL", lilac
+		return "shell command"
 	case flow.ActLLM:
-		return "LLM", violet
+		return "model writes"
 	case flow.ActHTTP:
-		return "HTTP", yellow
+		return "http call"
 	case flow.ActOutput:
-		return "OUTPUT", white
+		return "output"
 	}
-	return "SAY", green
-}
-
-func badge(n *flow.Node) string {
-	label, c := kindStyle(n)
-	return sInk.Background(c).Render(fmt.Sprintf(" %-6s ", label))
+	return "message"
 }
 
 // nodeDetail is the kind-specific part of a flow row: what the node can
@@ -84,13 +69,13 @@ func nodeDetail(n *flow.Node, ev runner.Event, ran bool) string {
 	case flow.Switch:
 		if ran {
 			out, _ := ev.Output.(map[string]any)
-			s = lipgloss.NewStyle().Foreground(slate).Bold(true).Render(tmpl.Format(out["value"]))
+			s = sAnswer.Render(tmpl.Format(out["value"]))
 		} else {
 			s = sDim.Render("on ") + slots(n.Switch)
 		}
 	}
 	if ran && ev.Branch == flow.Unsure {
-		s += sYellow.Render(" unsure")
+		s += sOrange.Render("  not sure enough")
 	}
 	return s
 }
@@ -109,43 +94,18 @@ func emptyView(q flow.Question) string {
 
 func answerView(q flow.Question, d backend.Decision) string {
 	switch q.Kind {
-	case flow.Bool:
-		return yesNo(d) + sDim.Render(fmt.Sprintf(" %.0f%%", d.Confidence*100))
-	case flow.Choice:
-		chosen := tmpl.Format(d.Answer)
-		parts := make([]string, len(q.Options))
-		for i, o := range q.Options {
-			if o == chosen {
-				parts[i] = lipgloss.NewStyle().Foreground(pink).Bold(true).Render("[" + o + "]")
-			} else {
-				parts[i] = sDim.Render(o)
-			}
-		}
-		return strings.Join(parts, " ")
+	case flow.Bool, flow.Choice:
+		return sAnswer.Render(answerLabel(q, d)) + sDim.Render(fmt.Sprintf(" %.0f%%", d.Confidence*100))
 	case flow.Score:
 		v, _ := d.Answer.(float64)
-		return lipgloss.NewStyle().Foreground(orange).Render(meter(q.Scale, v)) + fmt.Sprintf(" %.2f", v)
+		return sCyan.Render(meter(q.Scale, v)) + sAnswer.Render(fmt.Sprintf(" %.1f", v))
 	}
 	return ""
 }
 
-// compactAnswer fits one answer inside a MULTI row.
+// compactAnswer fits one answer of several on a line.
 func compactAnswer(q flow.Question, d backend.Decision) string {
-	switch q.Kind {
-	case flow.Bool:
-		return yesNo(d)
-	case flow.Score:
-		v, _ := d.Answer.(float64)
-		return lipgloss.NewStyle().Foreground(orange).Render(fmt.Sprintf("%.1f", v))
-	}
-	return lipgloss.NewStyle().Foreground(pink).Bold(true).Render(tmpl.Format(d.Answer))
-}
-
-func yesNo(d backend.Decision) string {
-	if yes, _ := d.Answer.(bool); yes {
-		return sGreen.Bold(true).Render("YES")
-	}
-	return sRed.Bold(true).Render("NO")
+	return sAnswer.Render(answerLabel(q, d))
 }
 
 // meter draws one cell per scale level, filled up to the rounded value.
@@ -178,7 +138,7 @@ func actionView(a *flow.ActionSpec, ev runner.Event, ran bool) string {
 		if !ran {
 			return slots(a.Prompt)
 		}
-		return lipgloss.NewStyle().Foreground(violet).Render("✎ ") + firstLine(tmpl.Format(out["text"]))
+		return sDim.Render("✎ ") + firstLine(tmpl.Format(out["text"]))
 	case flow.ActHTTP:
 		if !ran {
 			return sDim.Render(a.Method+" ") + slots(a.URL)
@@ -232,6 +192,7 @@ func firstLine(s string) string {
 
 // slots renders a template dim, with each {{ref}} shown as a ⟨ref⟩ slot.
 func slots(s string) string {
+	s = strings.Join(strings.Fields(s), " ") // one line, wherever it's shown
 	var b strings.Builder
 	rest := s
 	for {

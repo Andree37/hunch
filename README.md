@@ -5,7 +5,7 @@ Decision flows in YAML. You write the questions a model should answer
 it: it asks, branches on the answer **and on how sure the model is**, and
 does the work at the end (call an API, run a command, write a reply).
 
-![hunch tui running examples/hello.yaml](docs/demo/tui-2026-11-08-2338.png)
+![hunch tui running examples/hello.yaml](docs/demo/tui-2026-11-08-2351.png)
 
 ## Install
 

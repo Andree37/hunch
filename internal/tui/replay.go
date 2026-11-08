@@ -182,6 +182,9 @@ func (m *Model) openRun(i int) {
 	m.runID++ // ignore messages from any live run
 	m.replay, m.replayK = tr, len(tr.Steps)
 	m.run = replayRun(tr, m.replayK)
+	if m.flowView != viewPath {
+		m.flowView, m.cursor, m.nodeScroll = viewPath, 0, 0
+	}
 	m.flash = "opened run " + tr.ID
 	if m.oldVersion(tr) {
 		m.flash = "recorded with an older version of this flow"
@@ -227,7 +230,7 @@ func (m *Model) otherRunsLines() []string {
 	for _, flow := range slices.Sorted(maps.Keys(m.otherRuns)) {
 		lines = append(lines,
 			sDim.Render(fmt.Sprintf("%d run(s) of %s hidden; open them with:", m.otherRuns[flow], flow)),
-			sDim.Render("  hunch tui "+flow+" --runs "+m.runsPath))
+			sDim.Render("hunch tui "+flow+" --runs "+m.runsPath))
 	}
 	return lines
 }
@@ -294,7 +297,11 @@ func replayRun(tr *trace.Run, k int) *run {
 
 func (m *Model) runLines(w, h int) []string {
 	if len(m.runs) == 0 {
-		return append([]string{sDim.Render("no runs of this flow in " + m.runsPath + " yet")}, m.otherRunsLines()...)
+		lines := wrap(sDim.Render("No runs of this flow in "+m.runsPath+" yet."), w)
+		for _, l := range m.otherRunsLines() {
+			lines = append(lines, wrap(l, w)...)
+		}
+		return lines
 	}
 	var lines []string
 	for i, tr := range m.runs {
@@ -321,17 +328,20 @@ func (m *Model) runLines(w, h int) []string {
 			icon = sYellow.Render("⚠")
 			end += "  (older version of this flow)"
 		}
-		line := fmt.Sprintf("%s%s %s  %s  %s", marker, icon, sDim.Render(when), inputSummary(tr.Input), sDim.Render(end))
+		line := fmt.Sprintf("%s%s %s  %s", marker, icon, when, sDim.Render(end))
 		if m.replay == tr {
-			line += sTitle.Render("  ◀")
+			line += sTitle.Render("  ◀ open")
 		}
-		lines = append(lines, line)
+		lines = append(lines, line, "    "+sDim.Render(inputSummary(tr.Input)))
 	}
-	if top := m.runCursor - h + 1; top > 0 {
+	if top := 2*m.runCursor - h + 2; top > 0 {
 		lines = lines[top:]
 	}
 	if others := m.otherRunsLines(); len(others) > 0 {
-		lines = append(append(lines, ""), others...)
+		lines = append(lines, "")
+		for _, l := range others {
+			lines = append(lines, wrap(l, w)...)
+		}
 	}
 	return lines
 }

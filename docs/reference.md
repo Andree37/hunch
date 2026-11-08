@@ -285,7 +285,7 @@ hunch tui examples/triage.yaml       # lists and replays them
   somewhere else (a folder, a `.jsonl` file or `s3://…`), as does `--runs`;
   it updates while serve keeps recording (a file on change; a directory or
   S3 every 10s, in the background).
-- Enter loads a run into the graph and path views, with its input in pane 4.
+- Enter loads a run into the Run and Map views, with its input in the Input pane.
 - `esc` (or Enter on it again) closes it and puts back what you had before.
 - `s` replays it one step at a time, exactly as it happened; `r` runs the same
   input again live, e.g. after changing the flow, to see if it now goes the
@@ -459,33 +459,44 @@ With no flow given, the TUI starts on a picker listing every flow under the
 current folder, with its description and how many steps, tests and recorded
 runs it has. `F` inside a flow goes back to it.
 
-- **Flow** (top left): the flow as a tree from the start node, each edge
-  labelled with its branch (`yes ▶`, `sales ▶`, `else ▶`); the path the run took
-  is green. A node reachable from several places is drawn once, the others
-  point back to it (`↑`). Each node has a coloured badge for its kind
-  (`YES/NO`, `CHOICE`, `SCORE`, `MULTI`, `SAY`, `SHELL`) and shows its answer
-  in that kind's shape. `●` ran, `·` skipped, `◐` running, `⏸` paused before,
-  `✗` failed. After a run, **Outcome** names the node it ended on and what it
-  produced.
-  `v` switches to the **path** view: just what the run did, as numbered steps
-  with each answer and the question as it was asked, the result on top, and
-  `⚠ close call` on answers within 0.1 of their threshold.
-- **Tests** (bottom left): `✓`/`✗` from the last run of each case. Enter loads a case.
-- **Node** (top right): the selected node. The question as actually asked, a
-  probability bar per answer, confidence against the threshold, and what the
-  previous run answered.
-- **Inputs** (bottom right): the current case's input, or unsaved typed input.
-  Inputs the flow reads are listed even if empty, and empty ones block a run.
-  Enter on a choice or yes/no input opens a picker; on anything else, an
-  editor (alt+enter for newlines, e.g. to paste an email; numbers are checked
-  against min/max). `w` saves back to
-  the case (only its `input:` section changes, expectations stay), `n` saves as
-  a new case. Expectations show ✓/✗ under the inputs.
+The screen reads left to right: what goes in, what happened, and why.
+
+- **Header**: the flow, where the input came from (a test, a recorded run, or
+  typed), the backend, and dry run or LIVE. On the right, how the run went:
+  how many expectations held, steps, cost and time, or what is running now.
+- **2 Tests** (top left): `✓`/`✗` from the last run of each case. `enter`
+  loads one. `t` switches to the flow's **recorded runs**, two lines each: when
+  and where it ended, then its input.
+- **4 Input** (bottom left): the current input. Inputs the flow reads are
+  listed even if empty, and empty ones block a run. `enter` on a choice or
+  yes/no opens a picker; on anything else, an editor that takes the whole
+  screen (alt+enter for newlines, e.g. to paste an email; numbers are checked
+  against min/max). `w` saves back to the case (only its `input:` section
+  changes), `n` saves it as a new case.
+- **1 Run** (middle): the run as a story. The input on top, then each step:
+  where it went (`→ intent`), the question as it was asked, and the answer
+  with a bar of how sure the model was and a tick at the threshold. Answers
+  under the threshold say `not sure enough` (went to `unsure`) or
+  `under threshold` (no unsure route); within 0.1 of it, `close call`. A test's
+  expectations show as `✓` or `✗ expected …` on their step. It ends with where
+  the run ended, and any expectation about a step that never ran.
+- **1 Map** (`m`): the whole flow as a tree from the start node, each branch
+  labelled (`yes →`, `else →`). The branches the run took are green, so a node
+  reachable from several places (drawn once, the others say `↑ drawn above`)
+  shows which way it was reached. Before any run, the middle pane is the map.
+- **3 Step** (right): the selected step. The question as asked, a bar per
+  answer, a sentence on why that answer led where it did (sure enough, not
+  sure enough, or under the threshold with no unsure route), the routes with
+  the one taken marked, what the test expected, and what the previous run
+  answered.
 - Files are watched: edit the flow or a case in your editor and the TUI reloads.
 
-Keys: `j/k` move · `tab` next pane · `enter` edit / load case · `r` run (nothing else runs the flow) ·
-`F` back to the flow picker · `s` step one node · `v` graph / path view · `L` live / dry run · `x` stop · `1-4` jump to pane · `b` switch backend · `a` add input · `d` delete input · `w` save case ·
-`n` save as new case · `q` quit
+The footer lists the keys that matter where you are; `?` lists them all.
+`r` run · `s` step one node · `x` stop · `m` run / map · `1-4` jump to pane ·
+`tab` next pane · `j/k` move · `enter` load / open / edit · `b` switch backend ·
+`L` live / dry run · `a`/`d` add / delete input · `w` save case · `n` save as
+new case · `t` tests / recorded runs · `o` runs from elsewhere · `esc` close a
+recorded run · `F` flow picker · `q` quit
 
 ## Commands
 
