@@ -1,93 +1,41 @@
 {
+  "bar_lines": 2,
   "boxes": {
-    "flow": [
-      40,
-      80,
-      1070,
-      560
-    ],
-    "node": [
-      1070,
-      80,
-      2362,
-      720
-    ],
-    "tests": [
-      40,
-      800,
-      1070,
-      1030
-    ],
-    "inputs": [
-      1070,
-      738,
-      2362,
-      1030
-    ],
-    "cmd": [
-      20,
-      60,
-      1300,
-      200
-    ]
+    "yaml":      [20, 60, 1720, 620],
+    "y_worth":   [30, 100, 1700, 234],
+    "y_intent":  [30, 262, 1100, 426],
+    "y_ends":    [30, 452, 1250, 580],
+    "cmd":       [20, 60, 1300, 200],
+    "flow":      [40, 80, 1070, 560],
+    "tree":      [50, 146, 1065, 384],
+    "f_worth":   [50, 146, 1065, 189],
+    "f_intent":  [50, 188, 1065, 228],
+    "f_reply":   [50, 265, 1065, 305],
+    "f_archive": [50, 303, 1065, 343],
+    "f_outcome": [50, 420, 1065, 462],
+    "node":      [1070, 80, 2362, 720],
+    "n_answer":  [1085, 222, 2350, 545],
+    "n_answer2": [1085, 222, 2350, 575],
+    "inputs":    [1070, 738, 2362, 1030],
+    "i_msg1":    [1085, 884, 2350, 926],
+    "i_msg2":    [1085, 884, 2350, 926]
   },
   "shots": [
-    {
-      "t": 0,
-      "caption": "`hunch tui` opens a flow so you can run it and see why it went where it did",
-      "box": "cmd"
-    },
-    {
-      "t": 3.6,
-      "caption": "Left: the flow as a tree. Right: the node you have selected."
-    },
-    {
-      "t": 5.6,
-      "box": "tests",
-      "caption": "`2` jumps to the test cases. `enter` loads one."
-    },
-    {
-      "t": 8.6,
-      "box": "inputs",
-      "caption": "Its input: the message the flow has to decide on"
-    },
-    {
-      "t": 11.1,
-      "caption": "`r` runs the flow. The model answers each question in turn."
-    },
-    {
-      "t": 12.6,
-      "box": "flow",
-      "caption": "Green is the path it took: needs a reply, wants a meeting, so reply"
-    },
-    {
-      "t": 15.8,
-      "box": "node",
-      "caption": "Each answer has a probability. Under the threshold it would go to unsure."
-    },
-    {
-      "t": 19.2,
-      "box": "inputs",
-      "caption": "The test's expectations: ✓ means the model answered as expected"
-    },
-    {
-      "t": 22.2,
-      "caption": "`j` `enter` `r`: the next test, a newsletter"
-    },
-    {
-      "t": 24.0,
-      "box": "flow",
-      "caption": "No reply needed, so it went straight to archive"
-    },
-    {
-      "t": 26.8,
-      "box": "node",
-      "caption": "The node also shows what the previous run answered"
-    },
-    {
-      "t": 30.2,
-      "box": "flow",
-      "caption": "`v` shows only the steps that ran, in order"
-    }
+    {"t": 0,    "box": "yaml", "caption": "This is examples/hello.yaml.\nIt decides what to do with an incoming message."},
+    {"t": 3.5,  "box": "yaml", "mark": "y_worth",  "caption": "Question 1, worth_it: does the message need a reply?\nyes → ask question 2   ·   no → archive   ·   not sure enough → ask_me"},
+    {"t": 9.0,  "box": "yaml", "mark": "y_intent", "caption": "Question 2, intent: what do they want?\nsales → archive   ·   anything else (_) → reply"},
+    {"t": 13.5, "box": "yaml", "mark": "y_ends",   "caption": "Where it can end up. Here they just print a message;\na real flow could send the reply or call an API."},
+    {"t": 17.2, "box": "cmd",  "caption": "Let's send two messages through it.\n`hunch tui` opens the flow."},
+    {"t": 19.6, "mark": "tree", "caption": "The same flow, drawn as a tree.\nEach branch is labelled with the answer that leads to it."},
+    {"t": 24.4, "box": "inputs", "mark": "i_msg1", "caption": "Message 1 (from a test case):\n“Can we sync Thursday about the launch?”"},
+    {"t": 29.8, "caption": "`r` runs the flow.\nThe model answers question 1 first."},
+    {"t": 31.6, "box": "node", "mark": "n_answer", "caption": "Question 1: yes, it needs a reply, and the model is very sure.\nThat's above the 0.60 threshold, so it takes yes, not ask_me."},
+    {"t": 37.0, "box": "flow", "mark": ["f_worth", "f_intent"], "caption": "yes leads to question 2.\nGreen marks the path the run took."},
+    {"t": 40.3, "box": "node", "mark": "n_answer", "caption": "Question 2: they want a meeting.\nmeeting isn't sales, so it takes the “anything else” branch."},
+    {"t": 46.2, "box": "flow", "mark": ["f_reply", "f_outcome"], "caption": "So message 1 ends at reply.\nworth_it (yes) → intent (meeting) → reply"},
+    {"t": 51.2, "box": "inputs", "mark": "i_msg2", "caption": "Message 2:\n“This week only, 20% off all office chairs!”"},
+    {"t": 56.8, "box": "node", "mark": "n_answer2", "caption": "Question 1: no, this doesn't need a reply.\n(The pane also shows the previous run answered yes.)"},
+    {"t": 62.0, "box": "flow", "mark": ["f_worth", "f_archive", "f_outcome"], "caption": "no goes straight to archive.\nQuestion 2 is never asked."},
+    {"t": 66.5, "caption": "Same flow, different message, different path,\nand you can see why at every step."}
   ]
 }
