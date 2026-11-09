@@ -149,7 +149,6 @@ func TestRunsLocation(t *testing.T) {
 	cases := []struct{ runs, want string }{
 		{"", "examples/triage.runs"},
 		{"history", "examples/history"},
-		{"s3://bucket/triage/", "s3://bucket/triage/"},
 		{"/var/hunch/runs", "/var/hunch/runs"},
 		{"off", ""},
 	}

@@ -281,13 +281,13 @@ func (f *Flow) BackendFor(n *Node) string {
 }
 
 // RunsLocation is where this flow's runs are recorded and read from: its
-// `runs:` (s3://..., or a path relative to the flow file), else <flow>.runs
+// `runs:` (a path, relative to the flow file), else <flow>.runs
 // next to the flow file, like its tests. Empty for `runs: off`.
 func (f *Flow) RunsLocation() string {
 	switch {
 	case f.Runs == "off":
 		return ""
-	case strings.HasPrefix(f.Runs, "s3://") || filepath.IsAbs(f.Runs):
+	case filepath.IsAbs(f.Runs):
 		return f.Runs
 	case f.Runs != "":
 		return filepath.Join(filepath.Dir(f.Path), f.Runs)
@@ -336,6 +336,9 @@ func Parse(data []byte) (*Flow, error) {
 		case "name":
 			f.Name = v.Value
 		case "runs":
+			if strings.Contains(v.Value, "://") {
+				return nil, errAt(v, "runs: %q: runs are kept on disk; give a folder, a .jsonl file or off", v.Value)
+			}
 			f.Runs = v.Value
 		case "start":
 			f.Start = v.Value

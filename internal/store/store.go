@@ -1,7 +1,5 @@
-// Package store keeps small objects either in a local directory or in S3,
-// chosen by the location string: "s3://bucket/prefix" or a path. Recordings
-// and serve's duplicate memory are built on it, so both can live on disk or
-// in S3 without caring which.
+// Package store keeps small objects as files under a directory. Recorded
+// runs are built on it: one file per run.
 package store
 
 import (
@@ -15,16 +13,9 @@ import (
 	"strings"
 )
 
-var (
-	ErrNotFound = errors.New("not found")
-	ErrExists   = errors.New("already exists")
-)
+var ErrNotFound = errors.New("not found")
 
 type Store interface {
-	// Create writes key only if it doesn't exist yet, atomically: of several
-	// writers racing for the same key, exactly one succeeds; the others get
-	// ErrExists.
-	Create(ctx context.Context, key string, data []byte) error
 	Put(ctx context.Context, key string, data []byte) error
 	Get(ctx context.Context, key string) ([]byte, error)
 	Delete(ctx context.Context, key string) error
@@ -33,45 +24,18 @@ type Store interface {
 	String() string
 }
 
-// IsRemote reports whether a location names S3 rather than the disk.
-func IsRemote(loc string) bool { return strings.HasPrefix(loc, "s3://") }
-
-// Open returns the store for a location: "s3://bucket/prefix" or a directory
-// (created if missing).
-func Open(ctx context.Context, loc string) (Store, error) {
-	if IsRemote(loc) {
-		return openS3(ctx, loc)
-	}
+// Open returns the store for a directory, created if missing.
+func Open(_ context.Context, loc string) (Store, error) {
 	if err := os.MkdirAll(loc, 0o755); err != nil {
 		return nil, err
 	}
 	return Dir(loc), nil
 }
 
-// Dir stores each key as a file under a directory. Create uses O_EXCL, so it
-// is atomic across processes sharing the directory (including over NFS/EFS).
+// Dir stores each key as a file under a directory.
 type Dir string
 
 func (d Dir) path(key string) string { return filepath.Join(string(d), filepath.FromSlash(key)) }
-
-func (d Dir) Create(_ context.Context, key string, data []byte) error {
-	p := d.path(key)
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if errors.Is(err, fs.ErrExist) {
-		return ErrExists
-	}
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
-}
 
 func (d Dir) Put(_ context.Context, key string, data []byte) error {
 	p := d.path(key)

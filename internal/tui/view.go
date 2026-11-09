@@ -313,7 +313,7 @@ func (m *Model) helpView(h int) string {
 		{"Input and tests", [][2]string{
 			{"a", "add an input"}, {"d", "delete an input"},
 			{"w", "save the input to this test"}, {"n", "save it (or the run) as a new test"},
-			{"t", "show tests or recorded runs"}, {"o", "read runs from another folder, file or s3://"},
+			{"t", "show tests or recorded runs"}, {"o", "read runs from another folder or file"},
 			{"esc", "close a recorded run"},
 		}},
 		{"Other", [][2]string{{"F", "back to the list of flows"}, {"?", "this help"}, {"q", "quit"}}},

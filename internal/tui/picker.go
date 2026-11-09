@@ -23,7 +23,7 @@ type FlowInfo struct {
 	About string // first comment line of the file
 	Nodes int
 	Tests int
-	Runs  int // recorded runs on disk; -1 when they live in S3
+	Runs  int // recorded runs on disk
 	Err   error
 }
 
@@ -62,10 +62,7 @@ func FindFlows(root string) []FlowInfo {
 		if cs, err := cases.Load(cases.Dir(p)); err == nil {
 			info.Tests = len(cs)
 		}
-		switch loc := f.RunsLocation(); {
-		case store.IsRemote(loc):
-			info.Runs = -1
-		case loc != "":
+		if loc := f.RunsLocation(); loc != "" {
 			if keys, err := store.Dir(loc).List(context.Background(), ""); err == nil {
 				info.Runs = len(keys)
 			}
@@ -221,9 +218,6 @@ func (a *App) View() string {
 			marker, name = sTitle.Render("▸"), sBold.Render(fi.Name)
 		}
 		runs := fmt.Sprintf("%d runs", fi.Runs)
-		if fi.Runs < 0 {
-			runs = "runs in S3"
-		}
 		lines = append(lines,
 			fmt.Sprintf("%s %s  %s", marker, name, sDim.Render(fi.Path)),
 			"    "+sDim.Render(fmt.Sprintf("%d steps · %d tests · %s", fi.Nodes, fi.Tests, runs)))
