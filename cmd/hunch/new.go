@@ -30,6 +30,7 @@ const newAttempts = 3
 // way hunch would, and writes them once they pass.
 func cmdNew(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("new", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, newHelp()) }
 	out := fs.String("o", "", "where to write the flow (default: NAME.yaml from the flow's name)")
 	writer := fs.String("with", "", "model that drafts it: anthropic[:MODEL], openai:MODEL, openrouter:MODEL or ollama:MODEL (default: anthropic if ANTHROPIC_API_KEY is set)")
 	var words []string
@@ -45,7 +46,8 @@ func cmdNew(ctx context.Context, args []string) error {
 	}
 	want := strings.TrimSpace(strings.Join(words, " "))
 	if want == "" {
-		return fmt.Errorf(`say what the flow should decide, e.g. hunch new "triage support tickets by urgency"`)
+		fmt.Print(newHelp())
+		return nil
 	}
 	w, label, err := draftWriter(*writer)
 	if err != nil {
@@ -71,6 +73,37 @@ func cmdNew(ctx context.Context, args []string) error {
 	}
 	fmt.Printf("\nnext:\n  hunch tui %s     # press R to run every test\n", path)
 	return nil
+}
+
+// newHelp explains hunch new, and says which model it would use here.
+func newHelp() string {
+	model := "  none yet. Jev can only answer questions, not write text.\n" +
+		"  Add ANTHROPIC_API_KEY=... to .env, or pick another model with --with.\n"
+	if _, label, err := draftWriter(""); err == nil {
+		model = "  " + label + "\n"
+	}
+	return `hunch new: write a flow and its test cases from one sentence
+
+usage:
+  hunch new "what the flow should decide" [-o FILE.yaml] [--with MODEL]
+
+example:
+  hunch new "approve refund requests"
+
+  A model writes refunds.yaml (the questions and where each answer leads)
+  and refunds.tests/ (4-6 example inputs with the answers you'd expect).
+  hunch checks them and sends any problems back to the model, up to 3
+  times, then writes the files. Nothing existing is overwritten.
+
+  Then: hunch tui refunds.yaml, and press R to run every test.
+
+model that would write it:
+` + model + `
+flags:
+  -o FILE.yaml   where to write the flow (default: named after the flow)
+  --with MODEL   anthropic[:MODEL] (default, claude-opus-5-5), openai:MODEL,
+                 openrouter:MODEL or ollama:MODEL
+`
 }
 
 // draftWriter picks the model that drafts flows.
