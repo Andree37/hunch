@@ -3,7 +3,7 @@
 # a person. Sending is itself a decision in the flow.
 #
 #   hunch tui examples/respond.yaml                   # dry run: nothing is sent
-#   hunch test examples/respond.yaml --backend jev    # Jev decides, mock writes
+#   hunch test examples/respond.yaml                  # Jev decides, mock writes
 #   hunch run examples/respond.yaml --case password-reset --dry-run --json
 #
 # Swap models by changing `default` (who decides) and `writer` (who writes),
@@ -12,7 +12,7 @@
 name: first-response
 
 backends:
-  default: mock
+  default: jev
   writer: mock
   mock: {kind: mock, seed: demo}
   jev: {kind: jev, provider: typesafe}

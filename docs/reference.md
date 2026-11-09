@@ -257,7 +257,7 @@ curl -H "Authorization: Bearer $HOOK_TOKEN" \
 
 ## Recording and replaying runs
 
-`hunch run` and `hunch serve` record every run: its input, each step
+`hunch run`, `hunch serve` and the TUI record every run: its input, each step
 (question as asked, what the model saw, probabilities, route, cost), and how
 it ended. By default runs go next to the flow, like its tests:
 `examples/triage.yaml` → `examples/triage.runs/`. Set `runs:` in the flow to

@@ -1,16 +1,16 @@
 # Decide what to do with an incoming message.
 #
 #   hunch tui examples/inbox.yaml                  # pick a test, or type input
-#   hunch test examples/inbox.yaml --backend jev   # check every test case
+#   hunch test examples/inbox.yaml                 # check every test case
 #   hunch run examples/inbox.yaml --case boss-meeting
 #
 # Inputs are declared below; their values come from test cases in
-# inbox.tests/, or from typing / picking them in the TUI. The mock backend answers deterministically;
-# for real Jev put TYPESAFE_API_KEY=... in .env and use --backend jev.
+# inbox.tests/, or from typing / picking them in the TUI. Jev decides: put
+# TYPESAFE_API_KEY=... in .env. --backend mock runs offline with made-up answers.
 name: inbox-reply
 
 backends:
-  default: mock
+  default: jev
   mock:
     kind: mock
     seed: demo

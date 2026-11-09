@@ -1,14 +1,17 @@
 # The smallest useful flow: does a message need a reply, and what kind?
 #
 #   hunch run examples/hello.yaml --set message="Can we sync Thursday?"
-#   hunch test examples/hello.yaml --backend jev
+#   hunch test examples/hello.yaml
 #   hunch tui examples/hello.yaml
+#
+# Jev decides, so put TYPESAFE_API_KEY=... in .env. --backend mock runs
+# offline, but mock makes its answers up, so the tests fail on it.
 name: hello
 
 backends:
-  default: mock                         # offline, deterministic
-  mock: {kind: mock, seed: demo}
-  jev: {kind: jev, provider: typesafe}  # --backend jev, needs TYPESAFE_API_KEY
+  default: jev
+  jev: {kind: jev, provider: typesafe}  # needs TYPESAFE_API_KEY
+  mock: {kind: mock, seed: demo}        # --backend mock: offline, made-up answers
 
 nodes:
   worth_it:

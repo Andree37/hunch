@@ -13,10 +13,9 @@ does the work at the end (call an API, run a command, write a reply).
 go install github.com/Andree37/hunch/cmd/hunch@latest
 ```
 
-Every example runs offline with the built-in `mock` backend, which answers
-at random but always the same way. For real answers, put
-`TYPESAFE_API_KEY=...` in a `.env` file and add `--backend jev` (see
-[Models](#4-use-a-real-model)).
+The examples ask Jev for their answers, so put `TYPESAFE_API_KEY=...` in a
+`.env` file first (see [Models](#4-use-a-real-model)). `--backend mock` runs
+them offline, but mock makes its answers up, so their tests fail on it.
 
 ## How it works
 
@@ -41,9 +40,9 @@ a reply, and what kind:
 name: hello
 
 backends:
-  default: mock                         # offline, deterministic
-  mock: {kind: mock, seed: demo}
-  jev: {kind: jev, provider: typesafe}  # --backend jev, needs TYPESAFE_API_KEY
+  default: jev
+  jev: {kind: jev, provider: typesafe}  # needs TYPESAFE_API_KEY
+  mock: {kind: mock, seed: demo}        # --backend mock: offline, made-up answers
 
 nodes:
   worth_it:
@@ -67,7 +66,7 @@ run yet.
 ### 2. Run it
 
 ```sh
-hunch run examples/hello.yaml --backend jev --set message="Can we sync Thursday?"
+hunch run examples/hello.yaml --set message="Can we sync Thursday?"
 ```
 
 Inputs come from `--set name=value`, or from a test case with `--case NAME`.
@@ -89,7 +88,7 @@ expect:
 ```
 
 ```sh
-hunch test examples/hello.yaml --backend jev
+hunch test examples/hello.yaml
 ```
 
 Run them after changing a question, or with another `--backend`, to see what
@@ -115,7 +114,7 @@ check thresholds that depend on it against your test cases.
 
 ```sh
 hunch tui                                      # pick a flow in this folder
-hunch tui examples/hello.yaml --backend jev    # or open one
+hunch tui examples/hello.yaml    # or open one
 ```
 
 Load a test case (or type an input), press `r`, and see the path the run
@@ -169,7 +168,7 @@ curl -H "Authorization: Bearer $HOOK_TOKEN" -d '{"message": "Can we sync Thursda
 Each `POST /` runs the flow with the JSON body as input and replies with the
 path and outputs. Point a webhook at it.
 
-Every run (from `serve` or `run`) is recorded next to the flow, in
+Every run (from `serve`, `run` or the TUI) is recorded next to the flow, in
 `hello.runs/`. Open the flow in the TUI and press `2` to see them (`t`
 switches between runs and tests), `enter` to replay one, and `n` to save it
 as a test case. That's how real
