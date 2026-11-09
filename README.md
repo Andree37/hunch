@@ -122,7 +122,10 @@ took, each question as it was asked, and how sure the model was of every
 answer, as in the screenshot at the top. The keys are listed at the bottom of
 the screen.
 
-Edit the flow or a test case in your editor and the TUI reloads it.
+Press `R` to run every test at once and see them side by side: one row per
+test, one column per question, each answer with ✓ or ✗. Leave it up while you
+edit the flow or a test in your editor: every save runs them all again and
+marks what changed (`✗→✓`, `was 9/12`). `enter` on a row opens that test's run.
 
 ### 6. Make it do things
 

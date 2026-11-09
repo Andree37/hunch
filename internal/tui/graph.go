@@ -174,6 +174,7 @@ type flowView int
 const (
 	viewGraph flowView = iota
 	viewPath           // only what the last run did, in order
+	viewGrid           // every test at once
 )
 
 // rows are the Flow pane's selectable rows in the current view.

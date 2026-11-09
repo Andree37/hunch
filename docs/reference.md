@@ -489,10 +489,21 @@ The screen reads left to right: what goes in, what happened, and why.
   sure enough, or under the threshold with no unsure route), the routes with
   the one taken marked, what the test expected, and what the previous run
   answered.
-- Files are watched: edit the flow or a case in your editor and the TUI reloads.
+- **All tests** (`R`): every test case at once, 4 at a time, as a grid: one
+  row per test, one column per question (and rule) any test reached, then
+  where it ended. Each cell is the answer, yellow for a close call or under
+  the threshold, orange when it went to `unsure`, with `✓`/`✗` when the test
+  expects something of it. Above: how many passed, close calls, cost and
+  time. Below: every failed expectation in words. `enter` opens a test's run
+  without running it again; `g` comes back to the grid. Grid runs are dry and
+  aren't recorded.
+- Files are watched: edit the flow or a case in your editor and the TUI
+  reloads. With the grid up, every save runs all the tests again and marks
+  what changed: `✗→✓` or `✓→✗` on a test, `*` on an answer that changed, and
+  `was 9/12` in the summary.
 
 The footer lists the keys that matter where you are; `?` lists them all.
-`r` run · `s` step one node · `x` stop · `m` run / map · `1-4` jump to pane ·
+`r` run · `R` run every test · `g` back to all tests · `s` step one node · `x` stop · `m` run / map · `1-4` jump to pane ·
 `tab` next pane · `j/k` move · `enter` load / open / edit · `b` switch backend ·
 `L` live / dry run · `a`/`d` add / delete input · `w` save case · `n` save as
 new case · `t` tests / recorded runs · `o` runs from elsewhere · `esc` close a

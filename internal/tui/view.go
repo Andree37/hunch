@@ -88,6 +88,10 @@ func (m *Model) panes(bodyH int) string {
 		pane(m.inputsTitle(), inputLines, leftW, inputsH, m.focus == focusInputs),
 	)
 
+	if m.flowView == viewGrid && m.grid != nil {
+		return lipgloss.JoinHorizontal(lipgloss.Top, left,
+			pane(m.centerTitle(), m.centerLines(restW-4, bodyH-3), restW, bodyH, m.focus == focusFlow))
+	}
 	if wide {
 		centerW := restW * 52 / 100
 		stepW := restW - centerW
@@ -248,6 +252,8 @@ func (m *Model) footerBar() string {
 		keys = "x stop · ? keys"
 	case m.pausedRun():
 		keys = "s next step · r run to end · x stop · ? keys"
+	case m.flowView == viewGrid && m.grid != nil && m.focus == focusFlow:
+		keys = "j/k select · enter open its run · R run all again · m map · ? keys"
 	case m.focus == focusInputs:
 		keys = "enter edit · a add · d delete · w save test · r run · ? keys"
 	case m.focus == focusTests:
@@ -255,7 +261,10 @@ func (m *Model) footerBar() string {
 	case m.focus == focusNode:
 		keys = "j/k scroll · r run · ? keys"
 	default:
-		keys = "j/k select · enter open step · r run · m " + m.otherView() + " · ? keys"
+		keys = "j/k select · enter open step · r run · R run all tests · m " + m.otherView() + " · ? keys"
+		if m.grid != nil {
+			keys = "j/k select · enter open step · r run · g all tests · m " + m.otherView() + " · ? keys"
+		}
 	}
 	return bar(" "+keys, m.flash+" ", m.width)
 }
@@ -283,7 +292,9 @@ func (m *Model) helpView(h int) string {
 		keys  [][2]string
 	}{
 		{"Run", [][2]string{
-			{"r", "run the flow; on a highlighted test or recorded run, run that"}, {"s", "run one step at a time"}, {"x", "stop"},
+			{"r", "run the flow; on a highlighted test or recorded run, run that"},
+			{"R", "run every test, side by side; saving the flow or a test runs them again"},
+			{"g", "back to every test's results"}, {"s", "run one step at a time"}, {"x", "stop"},
 			{"m", "switch between the run and the map of the flow"},
 			{"b", "switch backend"}, {"L", "live or dry run: dry runs don't send http writes"},
 		}},
@@ -331,6 +342,9 @@ func (m *Model) showingRun() bool {
 }
 
 func (m *Model) centerTitle() string {
+	if m.flowView == viewGrid && m.grid != nil {
+		return paneTitle(1, "All tests", "saving the flow or a test runs them again · m map")
+	}
 	if m.showingRun() {
 		return paneTitle(1, "Run", "m map")
 	}
@@ -360,6 +374,9 @@ func (m *Model) centerLines(w, h int) []string {
 		top = append(top, "")
 	}
 
+	if m.flowView == viewGrid && m.grid != nil {
+		return append(top, m.gridLines(w)...)
+	}
 	var lines []string
 	var rowLine []int
 	if m.showingRun() {

@@ -520,6 +520,91 @@ func TestLongOutputWrapsAndOpens(t *testing.T) {
 	}
 }
 
+// pumpGrid runs commands, batches included, until the grid is done.
+func pumpGrid(t *testing.T, m *Model, cmd tea.Cmd) {
+	t.Helper()
+	queue := []tea.Cmd{cmd}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(queue) > 0 && time.Now().Before(deadline) && !(m.grid != nil && m.grid.done) {
+		c := queue[0]
+		queue = queue[1:]
+		if c == nil {
+			continue
+		}
+		msg := c()
+		if b, ok := msg.(tea.BatchMsg); ok {
+			queue = append(queue, b...)
+			continue
+		}
+		if _, ok := msg.(tickMsg); ok {
+			continue
+		}
+		_, next := m.Update(msg)
+		queue = append(queue, next)
+	}
+	if m.grid == nil || !m.grid.done {
+		t.Fatal("grid did not finish")
+	}
+}
+
+func TestGridRunsEveryTestAndRerunsOnSave(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	flowSrc := func(answer string) []byte {
+		return []byte(`backends: {m: {kind: mock, answers: {a: ` + answer + `}}}
+nodes:
+  a: {bool: "Reply to {{who}}?", then: {yes: b, no: c}}
+  b: {action: log, message: replied}
+  c: {action: log, message: archived}
+`)
+	}
+	os.WriteFile(path, flowSrc("yes"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "f.tests"), 0o755)
+	os.WriteFile(filepath.Join(dir, "f.tests", "ann.yaml"), []byte("input: {who: ann}\nexpect: {a: yes}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "f.tests", "bob.yaml"), []byte("input: {who: bob}\nexpect: {a: no}\n"), 0o644)
+
+	m, err := New(path, nil, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
+	_, cmd := m.Update(press("R"))
+	pumpGrid(t, m, cmd)
+	screen := ansi.Strip(m.View())
+	for _, want := range []string{"All tests", "✗ 1/2 passed", "      test  a", "✓ ann   yes ✓", "✗ bob   yes ✗", "the test expects a = no, but got yes"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("grid missing %q:\n%s", want, screen)
+		}
+	}
+	// The tests pane picks up the results too.
+	if !cases.Passed(m.results["ann"]) || cases.Passed(m.results["bob"]) {
+		t.Errorf("results = %+v", m.results)
+	}
+
+	// enter opens a test's run without running it again.
+	m.Update(press("j"))
+	m.Update(press("enter"))
+	if m.flowView != viewPath || m.active != 1 || m.run == nil || !m.run.done || m.run.inputs["who"] != "bob" {
+		t.Fatalf("enter should open bob's run: view=%v active=%d", m.flowView, m.active)
+	}
+	m.Update(press("g"))
+	if m.flowView != viewGrid {
+		t.Fatal("g should bring the grid back")
+	}
+
+	// Saving the flow runs every test again and marks what changed.
+	os.WriteFile(path, flowSrc("no"), 0o644)
+	m.modTime = time.Time{}
+	_, cmd = m.Update(tickMsg{})
+	pumpGrid(t, m, cmd)
+	screen = ansi.Strip(m.View())
+	for _, want := range []string{"✗ 1/2 passed · was 1/2", "✓→✗ ann", "✗→✓ bob", "no*"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("rerun missing %q:\n%s", want, screen)
+		}
+	}
+}
+
 func TestHelp(t *testing.T) {
 	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})

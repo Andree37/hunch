@@ -123,6 +123,10 @@ type Model struct {
 	replayK     int        // how many of its steps are shown
 	live        bool       // http nodes really send; off by default
 
+	grid       *gridRun // every test run at once, shown side by side
+	gridID     int
+	gridCursor int
+
 	help   bool // the key list covers the screen
 	detail bool // the selected step covers the screen
 
@@ -309,20 +313,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		// Poll rather than watch: survives editors that save by rename.
+		changedFiles := false
 		if st, err := os.Stat(m.path); err == nil && !st.ModTime().Equal(m.modTime) {
 			if err := m.load(); err != nil {
 				m.flash = "reload failed"
 			} else {
 				m.flash = "reloaded " + filepath.Base(m.path)
+				changedFiles = true
 			}
 		}
 		refresh := m.refreshRuns()
 		if casesStamp(m.path) != m.casesStamp {
 			if err := m.loadCases(); err != nil {
 				m.flash = "tests: " + err.Error()
+			} else {
+				changedFiles = true
 			}
 		}
-		return m, tea.Batch(tick(), refresh)
+		// With the grid up, every save runs the tests again.
+		var rerun tea.Cmd
+		if changedFiles && m.grid != nil && m.flowView == viewGrid {
+			if rerun = m.startGrid(); rerun != nil {
+				m.flash = "changed · running every test again"
+			}
+		}
+		return m, tea.Batch(tick(), refresh, rerun)
+
+	case gridStartMsg, gridRowMsg, gridDoneMsg:
+		return m, m.updateGrid(msg)
 
 	case animMsg:
 		m.frame++
@@ -331,7 +349,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reveal++
 			m.revealAt = time.Now()
 		}
-		busy := r != nil && (m.reveal < len(r.path) || time.Since(m.revealAt) < barFill || (!r.done && r.paused == ""))
+		busy := m.gridRunning() || r != nil && (m.reveal < len(r.path) || time.Since(m.revealAt) < barFill || (!r.done && r.paused == ""))
 		if !busy {
 			m.ticking = false
 			return m, nil
@@ -448,6 +466,15 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "?":
 		m.help = true
+	case "R":
+		m.focus = focusFlow
+		return m, m.startGrid()
+	case "g":
+		if m.grid == nil {
+			m.flash = "R runs every test"
+			return m, nil
+		}
+		m.flowView, m.focus = viewGrid, focusFlow
 	case "esc":
 		if m.replaying() {
 			m.closeRun()
@@ -464,6 +491,11 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "1", "2", "3", "4":
 		m.focus = focus(msg.String()[0] - '1')
 	case "j", "down":
+		switch {
+		case m.focus == focusFlow && m.flowView == viewGrid:
+			m.gridCursor = min(m.gridCursor+1, len(m.grid.rows)-1)
+			return m, nil
+		}
 		switch m.focus {
 		case focusFlow:
 			m.cursor = max(min(m.cursor+1, len(m.rows())-1), 0)
@@ -480,6 +512,11 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.nodeScroll++
 		}
 	case "k", "up":
+		switch {
+		case m.focus == focusFlow && m.flowView == viewGrid:
+			m.gridCursor = max(m.gridCursor-1, 0)
+			return m, nil
+		}
 		switch m.focus {
 		case focusFlow:
 			m.cursor = max(m.cursor-1, 0)
@@ -560,6 +597,9 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.flash = "backend: " + m.backend
 	case "enter", "e":
 		switch {
+		case m.focus == focusFlow && m.flowView == viewGrid:
+			m.openGridRow(m.gridCursor)
+			return m, m.kick()
 		case (m.focus == focusFlow || m.focus == focusNode) && m.selected() != nil:
 			m.detail, m.nodeScroll = true, 0
 		case m.focus == focusInputs && len(m.inputs) > 0:
