@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -20,10 +21,12 @@ import (
 //	model:   required, a Bedrock model or inference profile ID
 //	region:  default from the AWS config
 //	profile: AWS shared-config profile to use
+//	timeout: seconds per call, retries included (default 120)
 type bedrockChat struct {
-	client *bedrockruntime.Client
-	model  string
-	opts   map[string]any
+	client  *bedrockruntime.Client
+	model   string
+	timeout time.Duration
+	opts    map[string]any
 }
 
 func newBedrock(cfg flow.BackendConfig) (*chatBackend, error) {
@@ -43,11 +46,13 @@ func newBedrock(cfg flow.BackendConfig) (*chatBackend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("backend %q: AWS config: %w", cfg.Name, err)
 	}
-	m := &bedrockChat{client: bedrockruntime.NewFromConfig(awsCfg), model: model, opts: o}
+	m := &bedrockChat{client: bedrockruntime.NewFromConfig(awsCfg), model: model, timeout: optSeconds(o, "timeout", 120), opts: o}
 	return newChatBackend(cfg, m), nil
 }
 
 func (m *bedrockChat) chat(ctx context.Context, r chatRequest) (string, float64, error) {
+	ctx, cancel := context.WithTimeout(ctx, m.timeout)
+	defer cancel()
 	system, user, maxTokens := r.System, r.User, r.MaxTokens
 	in := &bedrockruntime.ConverseInput{
 		ModelId: aws.String(m.model),

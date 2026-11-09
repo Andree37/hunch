@@ -336,3 +336,8 @@ func optFloat(o map[string]any, key string, def float64) float64 {
 	}
 	return def
 }
+
+// optSeconds reads a duration given in seconds.
+func optSeconds(o map[string]any, key string, def float64) time.Duration {
+	return time.Duration(optFloat(o, key, def) * float64(time.Second))
+}

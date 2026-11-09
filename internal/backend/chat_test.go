@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Andree37/hunch/internal/flow"
 )
@@ -160,6 +161,65 @@ func TestAnthropicRefusalIsAnError(t *testing.T) {
 	_, err := b.(Writer).Write(context.Background(), WriteRequest{Prompt: "x"})
 	if err == nil || !strings.Contains(err.Error(), "declined") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestAnthropicIgnoresSDKEnv(t *testing.T) {
+	var auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"m","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer srv.Close()
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("request went to ANTHROPIC_BASE_URL")
+	}))
+	defer elsewhere.Close()
+	t.Setenv("ANTHROPIC_BASE_URL", elsewhere.URL)
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "not-for-this-flow")
+	t.Setenv("HUNCH_TEST_ANTHROPIC", "sk-test")
+
+	b, _ := New(flow.BackendConfig{Name: "anth", Kind: "anthropic", Options: map[string]any{
+		"model": "m", "base_url": srv.URL, "api_key_env": "HUNCH_TEST_ANTHROPIC",
+	}})
+	if _, err := b.(Writer).Write(context.Background(), WriteRequest{Prompt: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if auth != "" {
+		t.Errorf("sent Authorization %q from the environment", auth)
+	}
+
+	// With no base_url, ANTHROPIC_BASE_URL still isn't used, and a missing
+	// key says which variable to set instead of trying other credentials.
+	b, _ = New(flow.BackendConfig{Name: "anth", Kind: "anthropic", Options: map[string]any{
+		"model": "m", "api_key_env": "HUNCH_TEST_UNSET_KEY",
+	}})
+	_, err := b.(Writer).Write(context.Background(), WriteRequest{Prompt: "x"})
+	if err == nil || !strings.Contains(err.Error(), "HUNCH_TEST_UNSET_KEY is not set") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestAnthropicTimeout(t *testing.T) {
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer srv.Close()
+	defer close(done)
+	t.Setenv("HUNCH_TEST_ANTHROPIC", "sk-test")
+	b, _ := New(flow.BackendConfig{Name: "anth", Kind: "anthropic", Options: map[string]any{
+		"model": "m", "base_url": srv.URL, "api_key_env": "HUNCH_TEST_ANTHROPIC", "timeout": 0.2,
+	}})
+	start := time.Now()
+	_, err := b.(Writer).Write(context.Background(), WriteRequest{Prompt: "x"})
+	if err == nil || time.Since(start) > 2*time.Second {
+		t.Errorf("err = %v after %s", err, time.Since(start))
 	}
 }
 

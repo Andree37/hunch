@@ -413,7 +413,11 @@ For decisions, `openai` backends send a JSON schema the server must follow
 shape; set `structured: false` for a server that rejects it. Replies are
 parsed leniently and a reply that still doesn't fit is asked for once more.
 
-Chat backends also take `max_tokens`, `timeout`, and `price_in_per_mtok` / `price_out_per_mtok` to report cost.
+Chat backends also take `max_tokens`, `timeout` (seconds, default 120), and
+`price_in_per_mtok` / `price_out_per_mtok` to report cost. An `anthropic`
+backend reads its key only from `api_key_env` (default `ANTHROPIC_API_KEY`)
+and its endpoint only from `base_url`; `ANTHROPIC_BASE_URL`,
+`ANTHROPIC_AUTH_TOKEN` and SDK profiles in the environment are ignored.
 
 ## Test cases
 
