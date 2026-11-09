@@ -75,11 +75,12 @@ type run struct {
 }
 
 type Model struct {
-	path    string
-	flow    *flow.Flow
-	loadErr error
-	issues  []validate.Issue
-	modTime time.Time
+	path      string
+	flow      *flow.Flow
+	loadErr   error
+	issues    []validate.Issue
+	modTime   time.Time
+	projStamp string // the hunch.yaml in use and when it changed, to reload on save
 
 	backend string
 	writer  string // overrides the flow's writer for llm nodes, if set
@@ -201,12 +202,21 @@ func (m *Model) load() error {
 		return err
 	}
 	m.modTime = st.ModTime()
+	m.projStamp = projectStamp(m.path)
 	f, err := flow.Load(m.path)
 	if err != nil {
 		m.loadErr = err
 		return err
 	}
 	m.flow, m.loadErr = f, nil
+	// A model picked earlier may be gone from a changed hunch.yaml.
+	if _, ok := f.Backends[m.backend]; m.backend != "" && !ok {
+		m.flash = m.backend + " is no longer in hunch.yaml · deciding with " + f.DefaultBackend
+		m.backend = f.DefaultBackend
+	}
+	if _, ok := f.Backends[m.writer]; m.writer != "" && !ok {
+		m.writer = ""
+	}
 	m.cursor = min(m.cursor, max(len(m.rows())-1, 0))
 	// Offer every value the flow reads but nothing produces.
 	for _, k := range f.Inputs() {
@@ -216,6 +226,26 @@ func (m *Model) load() error {
 	}
 	m.revalidate()
 	return nil
+}
+
+// projectStamp names the hunch.yaml a flow would use and when it last
+// changed, so a save, a new file or a removed one shows up.
+func projectStamp(flowPath string) string {
+	dir, err := filepath.Abs(filepath.Dir(flowPath))
+	if err != nil {
+		return ""
+	}
+	for {
+		p := filepath.Join(dir, flow.ProjectFile)
+		if st, err := os.Stat(p); err == nil {
+			return p + "@" + st.ModTime().String()
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 // revalidate checks the flow with the inputs counted as state, so refs the
@@ -324,12 +354,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		// Poll rather than watch: survives editors that save by rename.
 		changedFiles := false
-		if st, err := os.Stat(m.path); err == nil && !st.ModTime().Equal(m.modTime) {
+		st, err := os.Stat(m.path)
+		flowChanged := err == nil && !st.ModTime().Equal(m.modTime)
+		projChanged := projectStamp(m.path) != m.projStamp
+		if flowChanged || projChanged {
+			name := filepath.Base(m.path)
+			if !flowChanged {
+				name = flow.ProjectFile
+			}
+			before := m.flash
 			if err := m.load(); err != nil {
-				m.flash = "reload failed"
+				m.flash = "reload failed: " + err.Error()
 			} else {
-				m.flash = "reloaded " + filepath.Base(m.path)
 				changedFiles = true
+				if m.flash == before { // load didn't have more to say
+					m.flash = "reloaded " + name
+				}
 			}
 		}
 		refresh := m.refreshRuns()

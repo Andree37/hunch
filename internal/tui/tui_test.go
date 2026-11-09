@@ -1432,3 +1432,43 @@ func TestNoProjectSaysHowToStart(t *testing.T) {
 		t.Errorf("mock needs no hunch.yaml: %v", err)
 	}
 }
+
+func TestSavingHunchYamlReloadsTheModels(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	project := filepath.Join(dir, "hunch.yaml")
+	writeFlow(t, path, []byte("nodes: {a: {bool: q, then: {_: b}}, b: {action: log, message: m}}\n---\nmodels: {first: {url: mock}, second: {url: mock}}\n"), 0o644)
+	m, err := New(path, nil, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+	m.Update(press("b"))
+	m.Update(press("j"))
+	m.Update(press("enter"))
+	if m.backend != "second" {
+		t.Fatalf("picked %q", m.backend)
+	}
+	save := func(src string) {
+		os.WriteFile(project, []byte(src), 0o644)
+		later := time.Now().Add(time.Duration(len(src)) * time.Second)
+		os.Chtimes(project, later, later)
+		m.Update(tickMsg{})
+	}
+
+	// A new model shows up; the one picked stays.
+	save("models: {first: {url: mock}, second: {url: mock}, laya: http://localhost:8000/v1/systemone}")
+	if _, ok := m.flow.Backends["laya"]; !ok || m.backend != "second" || m.flash != "reloaded hunch.yaml" {
+		t.Errorf("after adding laya: models=%v backend=%q flash=%q", m.modelNames(), m.backend, m.flash)
+	}
+	// The picked model is removed: back to the default, and it says so.
+	save("default: laya\nmodels: {first: {url: mock}, laya: http://localhost:8000/v1/systemone}")
+	if m.backend != "laya" || !strings.Contains(m.flash, "second is no longer in hunch.yaml") {
+		t.Errorf("after removing second: backend=%q flash=%q", m.backend, m.flash)
+	}
+	// A broken file keeps the last good models and says why.
+	save("models: {x: http://localhost:11434}")
+	if m.backend != "laya" || !strings.Contains(m.flash, "reload failed") || !strings.Contains(m.flash, "can't tell") {
+		t.Errorf("broken file: backend=%q flash=%q", m.backend, m.flash)
+	}
+}
