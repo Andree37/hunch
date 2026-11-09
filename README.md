@@ -103,6 +103,7 @@ Backends are declared in the flow and picked per run with `--backend`
 |---|---|---|
 | `mock` | Offline, deterministic. `answers: {node: value}` forces answers. | none |
 | `jev` | TypeSafe's Jev, with calibrated confidence. Best for routing on `unsure`. | `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` |
+| `jev` with `provider: laya` | Convai's Laya, a small open decision model, run on your machine by `laya-serve`. | none |
 | `openai` | Any OpenAI-compatible server: OpenAI, Ollama, OpenRouter, vLLM, LM Studio. | `OPENAI_API_KEY` |
 | `anthropic` | The Anthropic API. | `ANTHROPIC_API_KEY` |
 | `bedrock` | Amazon Bedrock. | AWS credentials |

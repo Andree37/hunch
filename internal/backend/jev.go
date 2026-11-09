@@ -15,11 +15,12 @@ import (
 	"github.com/Andree37/hunch/internal/flow"
 )
 
-// Jev calls TypeSafe's Jev decision model, either through OpenRouter's
-// Decisions API or TypeSafe's own API. Both take the same request body.
-// Options:
+// Jev calls a decision model that speaks TypeSafe's Jev API: Jev through
+// OpenRouter's Decisions API or TypeSafe's own API, or Convai's Laya served
+// on this machine by laya-serve (pip install "laya[serve]"). All take the
+// same request body. Options:
 //
-//	provider:       openrouter (default) or typesafe
+//	provider:       openrouter (default), typesafe, or laya (local, no key)
 //	model:          defaults per provider
 //	api_key_env:    env var holding the key (OPENROUTER_API_KEY / TYPESAFE_API_KEY)
 //	url:            override the endpoint
@@ -34,6 +35,7 @@ type Jev struct {
 	keyEnv      string
 	pricePerTok float64
 	maxRetries  int
+	keyOptional bool // a local server that may not check keys
 	client      *http.Client
 	backoff     time.Duration
 }
@@ -41,6 +43,9 @@ type Jev struct {
 var jevProviders = map[string]struct{ url, model, keyEnv string }{
 	"openrouter": {"https://openrouter.ai/api/alpha/decisions", "typesafe/jev-1.13", "OPENROUTER_API_KEY"},
 	"typesafe":   {"https://api.typesafe.ai/v1/systemone", "jev-latest", "TYPESAFE_API_KEY"},
+	// laya-serve's default address; the key is only needed if the server
+	// was started with LAYA_API_KEY.
+	"laya": {"http://localhost:8000/v1/systemone", "convaiinnovations/laya", "LAYA_API_KEY"},
 }
 
 func NewJev(cfg flow.BackendConfig) (*Jev, error) {
@@ -48,7 +53,7 @@ func NewJev(cfg flow.BackendConfig) (*Jev, error) {
 	provider := optString(o, "provider", "openrouter")
 	p, ok := jevProviders[provider]
 	if !ok {
-		return nil, fmt.Errorf("backend %q: unknown provider %q (want openrouter or typesafe)", cfg.Name, provider)
+		return nil, fmt.Errorf("backend %q: unknown provider %q (want openrouter, typesafe or laya)", cfg.Name, provider)
 	}
 	return &Jev{
 		name:        cfg.Name,
@@ -57,6 +62,7 @@ func NewJev(cfg flow.BackendConfig) (*Jev, error) {
 		keyEnv:      optString(o, "api_key_env", p.keyEnv),
 		pricePerTok: optFloat(o, "price_per_mtok", 0.042) / 1e6,
 		maxRetries:  int(optFloat(o, "max_retries", 3)),
+		keyOptional: provider == "laya",
 		client:      &http.Client{Timeout: optSeconds(o, "timeout", 30)},
 		backoff:     500 * time.Millisecond,
 	}, nil
@@ -98,7 +104,7 @@ type jevAnswer struct {
 
 func (j *Jev) Decide(ctx context.Context, state map[string]any, qs []flow.Question) (Response, error) {
 	key := os.Getenv(j.keyEnv)
-	if key == "" {
+	if key == "" && !j.keyOptional {
 		return Response{}, fmt.Errorf("backend %s: $%s is not set", j.name, j.keyEnv)
 	}
 
@@ -237,7 +243,9 @@ func (j *Jev) post(ctx context.Context, key string, body []byte, out any) error 
 		if err != nil {
 			return err
 		}
-		req.Header.Set("Authorization", "Bearer "+key)
+		if key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Title", "hunch")
 

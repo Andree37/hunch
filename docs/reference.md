@@ -298,6 +298,24 @@ your environment take precedence.
 
 ## Backends
 
+Laya is a small open decision model (about 421M parameters) that speaks
+Jev's API. Run it locally and point a backend at it:
+
+```sh
+python -m pip install "laya[serve]"   # Python 3.10+
+laya-serve                            # http://localhost:8000; downloads its checkpoints on first start
+```
+
+```yaml
+backends:
+  laya: {kind: jev, provider: laya}   # http://localhost:8000/v1/systemone, no key
+```
+
+`url:` points elsewhere; if the server was started with `LAYA_API_KEY`, set
+the same variable for hunch. Laya is much smaller than Jev and its
+probabilities can be overconfident, so check your thresholds against the
+tests (`R`, then `[` `]`) before trusting it.
+
 Any backend can make decisions. Chat-model backends can also write text for
 `llm` nodes. Chat models report their own confidence, so their probabilities
 aren't calibrated the way Jev's are.
@@ -305,7 +323,7 @@ aren't calibrated the way Jev's are.
 | Kind | Decides | Writes | Options |
 |---|---|---|---|
 | `mock` | ✓ | ✓ | Deterministic, offline. `answers: {node: value}` forces answers. |
-| `jev` | ✓ | | TypeSafe's Jev via `provider: typesafe` (`$TYPESAFE_API_KEY`) or `openrouter` (`$OPENROUTER_API_KEY`). |
+| `jev` | ✓ | | TypeSafe's Jev via `provider: typesafe` (`$TYPESAFE_API_KEY`) or `openrouter` (`$OPENROUTER_API_KEY`); or Convai's Laya on this machine via `provider: laya` (no key; see below). |
 | `openai` | ✓ | ✓ | Any OpenAI-compatible server: OpenAI, Ollama (`base_url: http://localhost:11434/v1`), OpenRouter, vLLM, LM Studio. `model`, `base_url`, `api_key_env` (default `OPENAI_API_KEY`). |
 | `anthropic` | ✓ | ✓ | Models via the Anthropic API. `model` (the model ID), `api_key_env` (default `ANTHROPIC_API_KEY`), `base_url`. |
 | `bedrock` | ✓ | ✓ | Any Amazon Bedrock model via the Converse API. `model` (model or inference profile ID), `region`, `profile`; AWS credentials from the usual chain. |

@@ -199,3 +199,57 @@ func TestJevMissingKey(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// Laya served locally by laya-serve: same API, no key, extra fields ignored.
+func TestLayaLocal(t *testing.T) {
+	var auth string
+	var asked map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		json.NewDecoder(r.Body).Decode(&asked)
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"model": "laya-rl-agent", "answers": {
+			"queue": {"type": "choice", "choice": "billing", "probabilities": {"billing": 0.9519, "tech": 0.0327, "other": 0.0154},
+				"confidence": 0.797, "answer_confidence": 0.9519, "action": {"act_probability": 1.0}, "x_jev_confidence": 0.9278},
+			"urgency": {"type": "score", "score": 1.6994, "legend": {"0": "calm", "1": "firm", "2": "angry", "3": "furious"},
+				"probabilities": {"0": 0.1, "1": 0.2, "2": 0.4136, "3": 0.2864}, "confidence": 0.1925},
+			"refund": {"type": "noul", "noul": 0.91}},
+			"usage": {"input_tokens": 83, "output_tokens": 0}, "routing": {"model": "english"}}`)
+	}))
+	defer srv.Close()
+	t.Setenv("LAYA_API_KEY", "")
+
+	b, err := New(flow.BackendConfig{Name: "laya", Kind: "jev", Options: map[string]any{"provider": "laya", "url": srv.URL + "/v1/systemone"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := flow.Parse([]byte(`nodes:
+  q:
+    questions:
+      queue: {choice: "Which team?", options: [billing, tech, other]}
+      urgency: {score: "How urgent?", levels: [calm, firm, angry, furious]}
+      refund: {bool: "Wants a refund?"}
+    then: done
+  done: {action: log, message: ok}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := b.Decide(context.Background(), map[string]any{"message": "charged twice"}, f.Node("q").Questions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth != "" || asked["model"] != "convaiinnovations/laya" {
+		t.Errorf("auth=%q model=%v", auth, asked["model"])
+	}
+	d := resp.Decisions
+	if d[0].Answer != "billing" || d[0].Confidence != 0.797 {
+		t.Errorf("choice = %+v", d[0])
+	}
+	if d[1].Answer.(float64) < 2.69 || d[1].Answer.(float64) > 2.71 || d[1].Confidence != 0.1925 {
+		t.Errorf("score = %+v", d[1])
+	}
+	if d[2].Answer != true || d[2].Confidence < 0.9 {
+		t.Errorf("bool = %+v", d[2])
+	}
+}
