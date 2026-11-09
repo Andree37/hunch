@@ -32,21 +32,21 @@ func (m *Model) markForCompare() {
 		return
 	}
 	tr := m.runs[min(m.runCursor, len(m.runs)-1)]
-	// Marked by id: the runs list is rebuilt when it's read again.
-	i := slices.IndexFunc(m.runs, func(r *trace.Run) bool { return r.ID == m.compareMark })
 	switch {
-	case m.compareMark == tr.ID:
-		m.compareMark = ""
-		m.flash = "unmarked"
-	case i < 0:
-		m.compareMark = tr.ID
+	case m.compareMark == nil:
+		m.compareMark = tr
 		m.flash = "marked · c on another run compares the two"
+	case sameRun(m.compareMark, tr):
+		m.compareMark = nil
+		m.flash = "unmarked"
 	default:
-		a, b := m.runs[i], tr
+		// The marked run is kept itself, so it can come from another runs
+		// list (o) than the one shown now.
+		a, b := m.compareMark, tr
 		if b.Time.Before(a.Time) {
 			a, b = b, a // older on the left
 		}
-		m.compare, m.compareMark = &comparison{a: a, b: b}, ""
+		m.compare, m.compareMark = &comparison{a: a, b: b}, nil
 	}
 }
 
@@ -276,4 +276,11 @@ func (m *Model) compareCell(id string, ev runner.Event, ok bool) string {
 		return strings.Join(parts, " ")
 	}
 	return sDim.Render("✓")
+}
+
+// sameRun reports whether two runs are the same recorded run. The runs list
+// is rebuilt when it's read again, so runs are matched by id when they have
+// one (a hand-written trace may not).
+func sameRun(a, b *trace.Run) bool {
+	return a == b || a != nil && b != nil && a.ID != "" && a.ID == b.ID
 }

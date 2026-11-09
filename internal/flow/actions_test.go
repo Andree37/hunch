@@ -156,3 +156,14 @@ func TestFindProjectWalksUp(t *testing.T) {
 		t.Errorf("project = %+v", f.Project)
 	}
 }
+
+func TestEmptyStateSection(t *testing.T) {
+	f, err := Parse([]byte("state:\n  # nothing yet\nnodes: {a: {action: log, message: \"{{who}}\"}}\n"))
+	if err != nil || f.State == nil {
+		t.Fatalf("state = %v, %v", f.State, err)
+	}
+	f.State["x"] = 1 // must not panic
+	if _, err := ParseProject([]byte("models: {j: {url: http://x/v1/systemone, key: $}}")); err == nil || !strings.Contains(err.Error(), "needs a variable name") {
+		t.Errorf("key: $ = %v", err)
+	}
+}

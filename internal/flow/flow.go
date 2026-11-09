@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -282,6 +283,21 @@ func (f *Flow) BackendFor(n *Node) string {
 	return f.DefaultBackend
 }
 
+// ModelsUsed lists the models this flow's questions and llm nodes use,
+// once each, in flow order. Only these need to work for it to run.
+func (f *Flow) ModelsUsed() []string {
+	var out []string
+	for _, n := range f.Nodes {
+		if !n.Kind.IsDecision() && !(n.Kind == Action && n.Action.Type == ActLLM) {
+			continue
+		}
+		if name := f.BackendFor(n); name != "" && !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // RunsLocation is where this flow's runs are recorded and read from: its
 // `runs:` (a path, relative to the flow file), else <flow>.runs
 // next to the flow file, like its tests. Empty for `runs: off`.
@@ -379,6 +395,9 @@ func Parse(data []byte) (*Flow, error) {
 	}
 	if f.Start == "" && len(f.Nodes) > 0 {
 		f.Start = f.Nodes[0].ID
+	}
+	if f.State == nil { // `state:` with nothing under it
+		f.State = map[string]any{}
 	}
 	f.UseProject(nil)
 	f.Project = nil

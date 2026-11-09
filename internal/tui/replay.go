@@ -97,8 +97,22 @@ func (m *Model) setRuns(runs []*trace.Run) {
 	runs, m.otherRuns = trace.OfFlow(runs, m.path)
 	slices.Reverse(runs) // newest first
 	prev := len(m.runs)
+	// The list is rebuilt from scratch: keep the highlighted and the open
+	// run by id, so a newly recorded run doesn't shift what they point at.
+	var cursorID string
+	if m.runCursor >= 0 && m.runCursor < len(m.runs) {
+		cursorID = m.runs[m.runCursor].ID
+	}
 	m.runs = runs
+	if i := slices.IndexFunc(runs, func(r *trace.Run) bool { return r.ID == cursorID }); cursorID != "" && i >= 0 {
+		m.runCursor = i
+	}
 	m.runCursor = max(min(m.runCursor, len(runs)-1), 0)
+	if m.replay != nil {
+		if i := slices.IndexFunc(runs, func(r *trace.Run) bool { return r.ID == m.replay.ID }); i >= 0 {
+			m.replay = runs[i]
+		}
+	}
 	if prev > 0 && len(runs) > prev {
 		m.flash = fmt.Sprintf("%d new run(s) recorded", len(runs)-prev)
 	}
@@ -335,12 +349,12 @@ func (m *Model) runLines(w, h int) []string {
 		if m.replay == tr {
 			line += sTitle.Render("  ◀ open")
 		}
-		if m.compareMark == tr.ID {
+		if sameRun(m.compareMark, tr) {
 			line += sYellow.Render("  ◆ compare")
 		}
 		lines = append(lines, line, "    "+sDim.Render(inputSummary(tr.Input)))
 	}
-	if top := 2*m.runCursor - h + 2; top > 0 {
+	if top := min(2*m.runCursor-h+2, len(lines)-1); top > 0 {
 		lines = lines[top:]
 	}
 	if others := m.otherRunsLines(); len(others) > 0 {

@@ -80,6 +80,7 @@ type gridRun struct {
 	// those rows.
 	model     []*gridRow
 	ranShifts map[string]int
+	ranWith   string // the models it ran with, "decider/writer"
 	savedPrev map[string]*gridRow
 	asking    bool    // A is asking the model what ? tests need
 	askCost   float64 // what those questions cost
@@ -140,7 +141,7 @@ func (m *Model) startGrid() tea.Cmd {
 	m.gridID++
 	ctx, cancel := context.WithCancel(context.Background())
 	g := &gridRun{
-		id: m.gridID, prev: prev, savedPrev: prev, ranShifts: maps.Clone(m.shifts),
+		id: m.gridID, prev: prev, savedPrev: prev, ranShifts: maps.Clone(m.shifts), ranWith: m.modelsInUse(),
 		started: time.Now(), cancel: cancel, ch: make(chan tea.Msg, 2*len(m.cases)+1),
 	}
 	shifts := shiftsOf(m.shifts)
@@ -210,23 +211,22 @@ func (m *Model) startGrid() tea.Cmd {
 	return tea.Batch(m.gridNext(), m.kick())
 }
 
+// modelsInUse names the models deciding and writing now, to tell when a
+// grid's answers came from others.
+func (m *Model) modelsInUse() string {
+	f := m.pickedFlow()
+	return f.DefaultBackend + "/" + f.WriterBackend
+}
+
 // gridFlow is a copy of the flow set to the backends picked in the TUI,
 // and those backends.
 func (m *Model) gridFlow() (*flow.Flow, map[string]backend.Backend, error) {
-	backends := map[string]backend.Backend{}
-	for name, cfg := range m.flow.Backends {
-		b, err := backend.New(cfg)
-		if err != nil {
-			return nil, nil, fmt.Errorf("backend %s: %w", name, err)
-		}
-		backends[name] = b
+	f := m.pickedFlow()
+	backends, err := backend.ForFlow(f)
+	if err != nil {
+		return nil, nil, err
 	}
-	f := *m.flow
-	f.DefaultBackend = m.backend
-	if m.writer != "" {
-		f.WriterBackend = m.writer
-	}
-	return &f, backends, nil
+	return f, backends, nil
 }
 
 // gridNext waits for the grid's next message.

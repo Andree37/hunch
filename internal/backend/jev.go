@@ -31,7 +31,6 @@ type Jev struct {
 	url         string
 	model       string
 	key         string
-	keyErr      error // the key's variable isn't set
 	pricePerTok float64
 	maxRetries  int
 	client      *http.Client
@@ -56,13 +55,15 @@ func NewJev(cfg flow.BackendConfig) (*Jev, error) {
 	if isJev {
 		price = 0.042
 	}
-	key, keyErr := apiKey(o)
+	key, err := apiKey(o)
+	if err != nil {
+		return nil, fmt.Errorf("model %q: %w", cfg.Name, err)
+	}
 	return &Jev{
 		name:        cfg.Name,
 		url:         endpoint,
 		model:       optString(o, "model", jevModel),
 		key:         key,
-		keyErr:      keyErr,
 		pricePerTok: optFloat(o, "price_per_mtok", price) / 1e6,
 		maxRetries:  int(optFloat(o, "max_retries", 3)),
 		client:      &http.Client{Timeout: optSeconds(o, "timeout", 30)},
@@ -108,10 +109,6 @@ type jevAnswer struct {
 }
 
 func (j *Jev) Decide(ctx context.Context, state map[string]any, qs []flow.Question) (Response, error) {
-	if j.keyErr != nil {
-		return Response{}, fmt.Errorf("model %s: %w", j.name, j.keyErr)
-	}
-	key := j.key
 
 	req := jevRequest{Model: j.model, State: state, Questions: map[string]jevQuestion{}}
 	for _, q := range qs {
@@ -123,7 +120,7 @@ func (j *Jev) Decide(ctx context.Context, state map[string]any, qs []flow.Questi
 	}
 
 	var res jevResponse
-	if err := j.post(ctx, key, body, &res); err != nil {
+	if err := j.post(ctx, j.key, body, &res); err != nil {
 		return Response{}, fmt.Errorf("backend %s: %w", j.name, err)
 	}
 

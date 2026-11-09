@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
+	"sync/atomic"
 
 	"github.com/Andree37/hunch/internal/flow"
 )
@@ -22,10 +25,13 @@ import (
 //	             follow (response_format). Set false if a server rejects it.
 type openAIChat struct {
 	url, model, key, keyHeader string
-	keyErr                     error
-	structured                 bool
-	opts                       map[string]any
-	client                     *http.Client
+	// OpenAI's reasoning models (o-series, gpt-5) refuse max_tokens and want
+	// max_completion_tokens; most other servers only know max_tokens. Set
+	// once a server has said so.
+	completionTokens atomic.Bool
+	structured       bool
+	opts             map[string]any
+	client           *http.Client
 }
 
 func newOpenAI(cfg flow.BackendConfig) (*chatBackend, error) {
@@ -34,12 +40,14 @@ func newOpenAI(cfg flow.BackendConfig) (*chatBackend, error) {
 	if model == "" {
 		return nil, fmt.Errorf("model %q: say which model the server should run (model: ...)", cfg.Name)
 	}
-	key, keyErr := apiKey(o)
+	key, err := apiKey(o)
+	if err != nil {
+		return nil, fmt.Errorf("model %q: %w", cfg.Name, err)
+	}
 	m := &openAIChat{
 		url:        optString(o, "endpoint", "https://api.openai.com/v1/chat/completions"),
 		model:      model,
 		key:        key,
-		keyErr:     keyErr,
 		keyHeader:  optString(o, "key_header", ""),
 		structured: o["structured"] != false,
 		opts:       o,
@@ -49,17 +57,28 @@ func newOpenAI(cfg flow.BackendConfig) (*chatBackend, error) {
 }
 
 func (m *openAIChat) chat(ctx context.Context, r chatRequest) (string, float64, error) {
-	if m.keyErr != nil {
-		return "", 0, m.keyErr
+	text, cost, err := m.send(ctx, r)
+	var he *httpError
+	if errors.As(err, &he) && he.status == http.StatusBadRequest && strings.Contains(he.body, "max_completion_tokens") && !m.completionTokens.Load() {
+		m.completionTokens.Store(true)
+		return m.send(ctx, r)
 	}
+	return text, cost, err
+}
+
+func (m *openAIChat) send(ctx context.Context, r chatRequest) (string, float64, error) {
 	type msg struct {
 		Role    string `json:"role"`
 		Content string `json:"content"`
 	}
 	body := map[string]any{
-		"model":      m.model,
-		"max_tokens": r.MaxTokens,
-		"messages":   []msg{{"system", r.System}, {"user", r.User}},
+		"model":    m.model,
+		"messages": []msg{{"system", r.System}, {"user", r.User}},
+	}
+	if m.completionTokens.Load() {
+		body["max_completion_tokens"] = r.MaxTokens
+	} else {
+		body["max_tokens"] = r.MaxTokens
 	}
 	if r.Schema != nil && m.structured {
 		body["response_format"] = map[string]any{

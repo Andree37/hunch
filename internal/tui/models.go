@@ -122,6 +122,7 @@ func (m *Model) openModels() tea.Cmd {
 
 func (m *Model) updateModels(key string) tea.Cmd {
 	names := m.modelNames()
+	m.modelCursor = max(min(m.modelCursor, len(names)-1), 0) // hunch.yaml may have changed
 	switch key {
 	case "j", "down":
 		m.modelCursor = min(m.modelCursor+1, len(names)-1)
@@ -130,6 +131,7 @@ func (m *Model) updateModels(key string) tea.Cmd {
 	case "enter":
 		m.backend, m.pickedModel = names[m.modelCursor], true
 		m.picking = false
+		m.revalidate()
 		m.flash = "deciding with " + m.backend + " · r or R to run"
 	case "w":
 		name := names[m.modelCursor]
@@ -139,6 +141,7 @@ func (m *Model) updateModels(key string) tea.Cmd {
 		}
 		m.writer = name
 		m.picking = false
+		m.revalidate()
 		m.flash = "writing with " + name
 	case "c":
 		m.checks = nil

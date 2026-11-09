@@ -319,6 +319,10 @@ instead. `mock` is always there (deterministic, offline, made-up answers);
 
 - **Keys**: `hunch.yaml` holds them, so keep it out of git. `key: $NAME`
   reads one from the environment instead, for files you do commit.
+- **Only the models a flow uses must work.** `run`, `test` and the TUI
+  connect to those (the default, the writer, and any node's `model:`)
+  before running anything, and stop with the reason if one can't be set
+  up, e.g. its `$NAME` isn't set. Other models in `hunch.yaml` don't matter.
 - **Picking**: `--model` picks who decides and `--writer` who writes, on
   `run`, `test` and `tui`; in the TUI, `b` lists the models (`enter` decides
   with one, `w` writes with one). Opening the list asks each model one small
@@ -456,14 +460,16 @@ The screen reads left to right: what goes in, what happened, and why.
   reloads. With the grid up, every save runs all the tests again and marks
   what changed: `✗→✓` or `✓→✗` on a test, `*` on an answer that changed, and
   `was 9/12` in the summary.
-- **Trying thresholds**: `←`/`→` pick a question (the selected one is
+- **Trying thresholds** (with the grid's pane selected, `1`): `←`/`→` pick a question (the selected one is
   underlined; a row under the names shows each threshold), and `[` / `]`
   move its threshold down or up by 0.05. The grid routes each test again on
   the answers the model already gave, so it costs nothing and is instant:
   `✓→✗` marks what the new threshold breaks, against the grid as the model
   ran it, and a tried threshold shows as `0.85*`. A test that now reaches a
   question the model was never asked shows `?`; `A` asks the model only
-  what those tests need, and keeps the answers. Runs with `r` use the tried
+  what those tests need, and keeps the answers (after switching models,
+  `R` runs the grid with the new one first, so rows don't mix two models'
+  answers). Runs with `r` use the tried
   thresholds too. `w` writes them into the flow as each node's
   `threshold:`, changing only those lines, and the tests run again.
 

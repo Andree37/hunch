@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -190,9 +191,8 @@ func TestAnthropicIgnoresSDKEnv(t *testing.T) {
 
 	// With no base_url, ANTHROPIC_BASE_URL still isn't used, and a missing
 	// key says where to add one instead of trying other credentials.
-	b, _ = New(flow.BackendConfig{Name: "anth", Kind: "anthropic", Options: map[string]any{"model": "m"}})
-	_, err := b.(Writer).Write(context.Background(), WriteRequest{Prompt: "x"})
-	if err == nil || !strings.Contains(err.Error(), "add key: to this model in hunch.yaml") {
+	_, err := New(flow.BackendConfig{Name: "anth", Kind: "anthropic", Options: map[string]any{"model": "m"}})
+	if err == nil || !strings.Contains(err.Error(), "add key: to it in hunch.yaml") {
 		t.Errorf("err = %v", err)
 	}
 }
@@ -298,5 +298,45 @@ func TestChatDecideRetriesOnce(t *testing.T) {
 	ctx := WithStatus(context.Background(), func(s string) { notes = append(notes, s) })
 	if _, err := b.Decide(ctx, nil, chatQuestions[:1]); err != nil || calls != 2 || len(notes) != 1 {
 		t.Errorf("err=%v calls=%d notes=%q", err, calls, notes)
+	}
+}
+
+func TestOpenAISwitchesToMaxCompletionTokens(t *testing.T) {
+	var fields []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if _, ok := body["max_tokens"]; ok {
+			fields = append(fields, "max_tokens")
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"error": {"message": "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."}}`)
+			return
+		}
+		fields = append(fields, "max_completion_tokens")
+		io.WriteString(w, `{"choices": [{"message": {"content": "hi"}}]}`)
+	}))
+	defer srv.Close()
+	b, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "gpt-5", "endpoint": srv.URL + "/v1/chat/completions"}})
+	for range 2 {
+		if resp, err := b.(Writer).Write(context.Background(), WriteRequest{Prompt: "x"}); err != nil || resp.Text != "hi" {
+			t.Fatalf("write = %+v, %v", resp, err)
+		}
+	}
+	if !slices.Equal(fields, []string{"max_tokens", "max_completion_tokens", "max_completion_tokens"}) {
+		t.Errorf("fields sent = %v", fields)
+	}
+}
+
+func TestAnthropicKeyNeededOnlyForItsOwnAPI(t *testing.T) {
+	for base, wantErr := range map[string]bool{
+		"":                                   true,
+		"https://API.Anthropic.com/":         true,
+		"https://gw.corp/api.anthropic.com/": false,
+		"http://localhost:4000/":             false,
+	} {
+		_, err := New(flow.BackendConfig{Name: "c", Kind: "anthropic", Options: map[string]any{"model": "m", "base_url": base}})
+		if (err != nil) != wantErr {
+			t.Errorf("%q: err = %v", base, err)
+		}
 	}
 }

@@ -256,7 +256,7 @@ func TestJevDefaultsByHost(t *testing.T) {
 	}
 }
 
-func TestKeyFromAVariableIsReadWhenUsed(t *testing.T) {
+func TestKeyFromAVariable(t *testing.T) {
 	var auth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth = r.Header.Get("Authorization")
@@ -264,16 +264,35 @@ func TestKeyFromAVariableIsReadWhenUsed(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := flow.BackendConfig{Name: "j", Kind: "jev", Options: map[string]any{"url": srv.URL, "api_key_env": "HUNCH_TEST_LATE_KEY"}}
-	b, err := New(cfg)
-	if err != nil {
-		t.Fatalf("an unset variable mustn't stop New: %v", err)
-	}
-	if _, err := b.Decide(context.Background(), nil, tutorialQuestions[:1]); err == nil || !strings.Contains(err.Error(), "$HUNCH_TEST_LATE_KEY is not set") {
+	if _, err := New(cfg); err == nil || !strings.Contains(err.Error(), "$HUNCH_TEST_LATE_KEY is not set") {
 		t.Errorf("unset: err = %v", err)
 	}
 	t.Setenv("HUNCH_TEST_LATE_KEY", "sk-late")
-	b, _ = New(cfg)
+	b, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := b.Decide(context.Background(), nil, tutorialQuestions[:1]); err != nil || auth != "Bearer sk-late" {
 		t.Errorf("set: err=%v auth=%q", err, auth)
+	}
+}
+
+func TestForFlowBuildsOnlyTheModelsUsed(t *testing.T) {
+	f, err := flow.ParseWithProject([]byte("nodes: {a: {bool: q, then: {_: b}}, b: {action: log, message: m}}"), []byte(`
+default: mock
+models:
+  jev:  {url: https://api.typesafe.ai/v1/systemone, key: $HUNCH_TEST_NEVER_SET}
+  nova: {url: https://bedrock-runtime.us-east-1.amazonaws.com, model: x, profile: hunch-test-no-such-profile}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs, err := ForFlow(f)
+	if err != nil || len(bs) != 1 || bs["mock"] == nil {
+		t.Fatalf("a flow on mock shouldn't need jev's key or nova's profile: %v %v", bs, err)
+	}
+	f.DefaultBackend = "jev"
+	if _, err := ForFlow(f); err == nil || !strings.Contains(err.Error(), "$HUNCH_TEST_NEVER_SET is not set") {
+		t.Errorf("a flow on jev needs its key, before it runs: %v", err)
 	}
 }

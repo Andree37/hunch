@@ -89,8 +89,7 @@ func ReportStatus(ctx context.Context, format string, args ...any) {
 }
 
 // apiKey is a model's key: written in hunch.yaml, or read from the
-// variable it names (key: $NAME). A missing variable is an error only for
-// a model that's used, so it's returned rather than failing New.
+// variable it names (key: $NAME).
 func apiKey(o map[string]any) (string, error) {
 	if k := optString(o, "api_key", ""); k != "" {
 		return k, nil
@@ -102,4 +101,23 @@ func apiKey(o map[string]any) (string, error) {
 		return "", fmt.Errorf("$%s is not set (this model's key in hunch.yaml)", env)
 	}
 	return "", nil
+}
+
+// ForFlow builds the models a flow uses (see flow.ModelsUsed), so one
+// broken model in hunch.yaml (an unset key, a missing AWS profile) only
+// stops the flows that use it, and before they run anything.
+func ForFlow(f *flow.Flow) (map[string]Backend, error) {
+	out := map[string]Backend{}
+	for _, name := range f.ModelsUsed() {
+		cfg, ok := f.Backends[name]
+		if !ok {
+			return nil, fmt.Errorf("model %q is not in hunch.yaml", name)
+		}
+		b, err := New(cfg)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = b
+	}
+	return out, nil
 }

@@ -130,13 +130,14 @@ type Model struct {
 	gridID     int
 	gridCursor int
 
-	picking     bool // the model list (b) covers the screen
-	pickedModel bool // chosen with --model or b, so a new default in hunch.yaml doesn't replace it
+	picking     bool   // the model list (b) covers the screen
+	pickedModel bool   // chosen with --model or b, so a new default in hunch.yaml doesn't replace it
+	lastDefault string // hunch.yaml's default when last read, to follow when it changes
 	modelCursor int
 	checks      map[string]*modelCheck // whether each model answered, by name
 	checksFor   string                 // the hunch.yaml they were checked against
 	compare     *comparison            // two recorded runs side by side
-	compareMark string                 // id of the first run picked with c
+	compareMark *trace.Run             // the first run picked with c
 
 	help   bool // the key list covers the screen
 	detail bool // the selected step covers the screen
@@ -157,7 +158,7 @@ type Model struct {
 // first case's input is loaded instead. backendName overrides the flow's
 // default backend.
 func New(path string, state map[string]any, backendName string, fromCase bool) (*Model, error) {
-	m := &Model{path: path, backend: backendName, pickedModel: backendName != "", active: -1, results: map[string][]cases.Result{}, animate: animations, record: animations}
+	m := &Model{path: path, active: -1, results: map[string][]cases.Result{}, animate: animations, record: animations}
 	for _, k := range slices.Sorted(maps.Keys(state)) {
 		m.inputs = append(m.inputs, input{k, tmpl.Format(state[k])})
 	}
@@ -171,15 +172,17 @@ func New(path string, state map[string]any, backendName string, fromCase bool) (
 	if fromCase && len(m.cases) > 0 {
 		m.useCase(0)
 	}
-	if m.backend == "" {
-		m.backend = m.flow.DefaultBackend
-	}
 	if m.flow.Project == nil && backendName != "mock" {
 		return nil, errors.New(flow.ProjectHelp(path))
 	}
-	if _, ok := m.flow.Backends[m.backend]; !ok {
-		return nil, fmt.Errorf("model %q is not in %s (it has %s)", m.backend, m.flow.Project.Path, strings.Join(m.flow.Project.Order, ", "))
+	m.backend = m.flow.DefaultBackend
+	if backendName != "" {
+		if _, ok := m.flow.Backends[backendName]; !ok {
+			return nil, fmt.Errorf("model %q is not in %s (it has %s)", backendName, m.flow.Project.Path, strings.Join(m.flow.Project.Order, ", "))
+		}
+		m.backend, m.pickedModel = backendName, true
 	}
+	m.revalidate()
 
 	m.keyEditor = textinput.New()
 	m.keyEditor.Prompt = "name: "
@@ -212,16 +215,25 @@ func (m *Model) load() error {
 		return err
 	}
 	m.flow, m.loadErr = f, nil
-	// A changed hunch.yaml: follow its default unless a model was picked,
-	// and notice a picked one that's gone.
-	if m.backend != "" && !m.pickedModel && m.backend != f.DefaultBackend {
+	// A changed hunch.yaml: follow a default: that changed unless a model
+	// was picked (not the first model standing in for a missing default:,
+	// which adding a model would change), and notice a model that's gone.
+	prevDefault := m.lastDefault
+	m.lastDefault = f.DefaultBackend
+	if m.backend != "" && !m.pickedModel && f.Project != nil && f.Project.DefaultGiven &&
+		f.DefaultBackend != prevDefault && f.DefaultBackend != m.backend {
 		m.flash = "deciding with " + f.DefaultBackend + ", the default in hunch.yaml"
 		m.backend = f.DefaultBackend
 	}
 	if _, ok := f.Backends[m.backend]; m.backend != "" && !ok {
-		m.flash = m.backend + " is no longer in hunch.yaml · deciding with " + f.DefaultBackend
+		gone := " is no longer in hunch.yaml"
+		if f.Project == nil {
+			gone = ": hunch.yaml is gone"
+		}
+		m.flash = m.backend + gone + " · deciding with " + f.DefaultBackend
 		m.backend, m.pickedModel = f.DefaultBackend, false
 	}
+	m.modelCursor = max(min(m.modelCursor, len(m.modelNames())-1), 0)
 	if _, ok := f.Backends[m.writer]; m.writer != "" && !ok {
 		m.writer = ""
 	}
@@ -250,10 +262,23 @@ func projectStamp(flowPath string) string {
 	return path + "@" + st.ModTime().String()
 }
 
-// revalidate checks the flow with the inputs counted as state, so refs the
-// inputs satisfy don't warn.
+// pickedFlow is a copy of the flow deciding and writing with the models
+// picked here (--model, --writer, b), which may not be hunch.yaml's.
+func (m *Model) pickedFlow() *flow.Flow {
+	f := *m.flow
+	if m.backend != "" {
+		f.DefaultBackend = m.backend
+	}
+	if m.writer != "" {
+		f.WriterBackend = m.writer
+	}
+	return &f
+}
+
+// revalidate checks the flow, with the models picked here and the inputs
+// counted as state, so refs the inputs satisfy don't warn.
 func (m *Model) revalidate() {
-	g := *m.flow
+	g := *m.pickedFlow()
 	g.State = maps.Clone(m.flow.State)
 	for _, in := range m.inputs {
 		if _, ok := g.State[in.key]; !ok {
@@ -386,7 +411,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var rerun tea.Cmd
 		if changedFiles && m.grid != nil && m.flowView == viewGrid {
 			if rerun = m.startGrid(); rerun != nil {
-				m.flash = "changed · running every test again"
+				// Keep what the reload had to say, e.g. that the model changed.
+				if m.flash == "" || strings.HasPrefix(m.flash, "reloaded ") {
+					m.flash = "changed · running every test again"
+				} else {
+					m.flash += " · running every test again"
+				}
 			}
 		}
 		return m, tea.Batch(tick(), refresh, rerun)
@@ -757,16 +787,17 @@ func (m *Model) loadHighlighted() {
 	}
 }
 
-// SetWriter makes llm nodes write with the named backend instead of the
-// flow's writer.
+// SetWriter makes llm nodes write with the named model instead of
+// hunch.yaml's writer.
 func (m *Model) SetWriter(name string) error {
 	if name == "" {
 		return nil
 	}
 	if _, ok := m.flow.Backends[name]; !ok {
-		return fmt.Errorf("backend %q is not defined in %s", name, m.path)
+		return fmt.Errorf("model %q is not in hunch.yaml (it has %s)", name, strings.Join(m.modelNames(), ", "))
 	}
 	m.writer = name
+	m.revalidate()
 	return nil
 }
 
@@ -969,21 +1000,13 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 		m.run.caseIdx = m.active
 	}
 
-	backends := map[string]backend.Backend{}
-	for name, cfg := range m.flow.Backends {
-		b, err := backend.New(cfg)
-		if err != nil {
-			m.run.err, m.run.done = err, true
-			return nil
-		}
-		backends[name] = b
+	pf := m.pickedFlow()
+	backends, err := backend.ForFlow(pf)
+	if err != nil {
+		m.run.err, m.run.done = err, true
+		return nil
 	}
-
-	f := *m.flow
-	f.DefaultBackend = m.backend
-	if m.writer != "" {
-		f.WriterBackend = m.writer
-	}
+	f := *pf
 	// A loaded test case's canned http responses apply to its runs.
 	var fakes map[string]runner.FakeResponse
 	if m.active >= 0 {

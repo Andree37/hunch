@@ -29,11 +29,12 @@ const ProjectFile = "hunch.yaml"
 // only needed where the server wants them; a key written as $NAME is read
 // from the environment. mock is always there, answering offline.
 type Project struct {
-	Path    string
-	Default string
-	Writer  string
-	Models  map[string]BackendConfig
-	Order   []string // model names in file order
+	Path         string
+	Default      string
+	DefaultGiven bool // default: is written, not the first model
+	Writer       string
+	Models       map[string]BackendConfig
+	Order        []string // model names in file order
 }
 
 // ProjectPath is the hunch.yaml in dir or the nearest folder above it, or
@@ -95,7 +96,7 @@ func ParseProject(data []byte) (*Project, error) {
 		v := fields[k]
 		switch k {
 		case "default":
-			p.Default = v.Value
+			p.Default, p.DefaultGiven = v.Value, true
 		case "writer":
 			p.Writer = v.Value
 		case "models":
@@ -150,6 +151,9 @@ func modelConfig(name string, n *yaml.Node) (BackendConfig, error) {
 		// $NAME is read when the model is used, so a missing variable
 		// only stops the models that need it.
 		if env, isRef := strings.CutPrefix(k, "$"); isRef {
+			if env == "" {
+				return cfg, fmt.Errorf("key: $ needs a variable name, e.g. key: $LAYA_API_KEY")
+			}
 			opts["api_key_env"] = env
 		} else {
 			opts["api_key"] = k

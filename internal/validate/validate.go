@@ -102,7 +102,7 @@ func (v *validator) node(n *flow.Node) {
 		case !ok:
 			v.errorf(n.ID, "model %q is not in hunch.yaml", name)
 		case !backend.CanWrite(cfg.Kind):
-			v.errorf(n.ID, "model %q is a decision model and can't write text; set writer: in hunch.yaml to a chat model", name)
+			v.errorf(n.ID, "model %q is a decision model and can't write text; write with a chat model (writer: in hunch.yaml, --writer, or w in the TUI's model list)", name)
 		}
 	}
 

@@ -115,13 +115,9 @@ func cmdRun(ctx context.Context, args []string) error {
 		return err
 	}
 
-	backends := map[string]backend.Backend{}
-	for name, cfg := range f.Backends {
-		b, err := backend.New(cfg)
-		if err != nil {
-			return err
-		}
-		backends[name] = b
+	backends, err := backend.ForFlow(f)
+	if err != nil {
+		return err
 	}
 
 	var rec *trace.Writer
@@ -262,13 +258,19 @@ func cmdTest(ctx context.Context, args []string) error {
 	if len(all) == 0 {
 		return fmt.Errorf("no test cases in %s", cases.Dir(path))
 	}
-	backends := map[string]backend.Backend{}
-	for name, cfg := range f.Backends {
-		b, err := backend.New(cfg)
-		if err != nil {
-			return err
+	// A name that matches no test is a mistake, not "nothing to run".
+	for _, name := range only {
+		if !slices.ContainsFunc(all, func(c *cases.Case) bool { return c.Name == name }) {
+			names := make([]string, len(all))
+			for i, c := range all {
+				names[i] = c.Name
+			}
+			return fmt.Errorf("no test named %q in %s (there's %s)", name, cases.Dir(path), strings.Join(names, ", "))
 		}
-		backends[name] = b
+	}
+	backends, err := backend.ForFlow(f)
+	if err != nil {
+		return err
 	}
 
 	ctx = backend.WithStatus(ctx, func(note string) { fmt.Fprintln(os.Stderr, "    …", note) })

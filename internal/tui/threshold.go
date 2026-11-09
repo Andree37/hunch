@@ -81,6 +81,10 @@ func (m *Model) moveThreshold(steps int) {
 		m.flash = "R runs every test; then ←/→ pick a question and [ ] try its threshold"
 		return
 	}
+	if m.focus != focusFlow { // w, which keeps them, means "save test" elsewhere
+		m.flash = "1 selects the grid; then [ ] try thresholds and w keeps them"
+		return
+	}
 	if !tunable(n) {
 		m.flash = n.ID + " doesn't route on confidence · ←/→ pick another question"
 		return
@@ -92,7 +96,7 @@ func (m *Model) moveThreshold(steps int) {
 	next := m.shifts[n.ID] + steps
 	cur := m.threshold(n)
 	if runner.Threshold(m.flow, n, float64(next)*thresholdStep) == cur {
-		return // pinned at 0 or 1
+		return // pinned at 0.01 or 1
 	}
 	if m.shifts == nil {
 		m.shifts = map[string]int{}
@@ -341,6 +345,13 @@ func (m *Model) askMissing() tea.Cmd {
 	}
 	if len(need) == 0 {
 		m.flash = "no test needs the model · ? marks those that do"
+		return nil
+	}
+	if g.ranWith != m.modelsInUse() {
+		// Asking a different model now would mix two models' answers in one
+		// row.
+		ran, _, _ := strings.Cut(g.ranWith, "/")
+		m.flash = "the grid's answers came from " + ran + "; R runs it again with " + m.backend
 		return nil
 	}
 	f, backends, err := m.gridFlow()

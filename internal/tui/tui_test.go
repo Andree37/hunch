@@ -23,6 +23,7 @@ import (
 	"github.com/Andree37/hunch/internal/flow"
 	"github.com/Andree37/hunch/internal/runner"
 	"github.com/Andree37/hunch/internal/trace"
+	"github.com/Andree37/hunch/internal/validate"
 )
 
 // writeFlow writes a test flow: the flow, then after a --- line the
@@ -1566,5 +1567,156 @@ func TestCompareMarkSurvivesReadingRunsAgain(t *testing.T) {
 	m.Update(press("c"))
 	if m.compare == nil || m.compare.a.ID == m.compare.b.ID {
 		t.Errorf("want two different runs compared: %+v", m.compare)
+	}
+}
+
+func TestTUIRejectsAMistypedModel(t *testing.T) {
+	if _, err := New("testdata/inbox.yaml", nil, "jevv", false); err == nil || !strings.Contains(err.Error(), `model "jevv" is not in`) {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestThresholdKeysOnlyInTheGridPane(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	writeFlow(t, path, []byte("threshold: 0.9\nnodes:\n  a: {bool: \"Reply to {{who}}?\", then: {yes: b, no: b}}\n  b: {action: log, message: m}\n---\nmodels: {m: {url: mock, answers: {a: yes}}}\n"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "f.tests"), 0o755)
+	os.WriteFile(filepath.Join(dir, "f.tests", "ann.yaml"), []byte("input: {who: ann}\n"), 0o644)
+	m, _ := New(path, nil, "", true)
+	m.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
+	_, cmd := m.Update(press("R"))
+	pumpGrid(t, m, cmd)
+	m.Update(press("2"))
+	m.Update(press("["))
+	if len(m.shifts) != 0 || !strings.Contains(m.flash, "1 selects the grid") {
+		t.Errorf("[ from pane 2: shifts=%v flash=%q", m.shifts, m.flash)
+	}
+}
+
+func TestModelListSurvivesHunchYamlShrinking(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	writeFlow(t, path, []byte("nodes: {a: {bool: q, then: {_: b}}, b: {action: log, message: m}}\n---\nmodels: {one: {url: mock}, two: {url: mock}, three: {url: mock}}\n"), 0o644)
+	m, _ := New(path, nil, "", false)
+	m.Update(press("b"))
+	for range 3 {
+		m.Update(press("j"))
+	}
+	os.WriteFile(filepath.Join(dir, "hunch.yaml"), []byte("models: {one: {url: mock}}\n"), 0o644)
+	later := time.Now().Add(time.Hour)
+	os.Chtimes(filepath.Join(dir, "hunch.yaml"), later, later)
+	m.Update(tickMsg{})
+	m.Update(press("enter")) // must not panic
+	if m.picking || m.backend == "" {
+		t.Errorf("picking=%v backend=%q", m.picking, m.backend)
+	}
+}
+
+func TestAddingAModelDoesntSwitchAnImplicitDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	writeFlow(t, path, []byte("nodes: {a: {bool: q, then: {_: b}}, b: {action: log, message: m}}\n---\nmodels: {one: {url: mock}}\n"), 0o644)
+	m, _ := New(path, nil, "", false)
+	os.WriteFile(filepath.Join(dir, "hunch.yaml"), []byte("models: {two: {url: mock}, one: {url: mock}}\n"), 0o644)
+	later := time.Now().Add(time.Hour)
+	os.Chtimes(filepath.Join(dir, "hunch.yaml"), later, later)
+	m.Update(tickMsg{})
+	if m.backend != "one" {
+		t.Errorf("listing two first shouldn't switch to it: %q", m.backend)
+	}
+}
+
+func TestPickedWriterIsWhatTheTUIChecks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	writeFlow(t, path, []byte("nodes: {draft: {action: llm, prompt: hi}}\n---\ndefault: jev\nmodels: {jev: https://api.typesafe.ai/v1/systemone}\n"), 0o644)
+	m, _ := New(path, nil, "", false)
+	if !slices.ContainsFunc(m.issues, func(i validate.Issue) bool { return strings.Contains(i.Msg, "can't write text") }) {
+		t.Fatalf("jev can't write: %v", m.issues)
+	}
+	if err := m.SetWriter("mock"); err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(m.issues, func(i validate.Issue) bool { return i.Severity == validate.Error }) {
+		t.Errorf("writing with mock should clear it: %v", m.issues)
+	}
+}
+
+func TestShortTerminalRunsPrompt(t *testing.T) {
+	runs := recordRuns(t,
+		map[string]any{"sender": "carol", "message": "hi"},
+		map[string]any{"sender": "boss", "message": "urgent"},
+		map[string]any{"sender": "ann", "message": "yo"},
+	)
+	m, _ := New("testdata/inbox.yaml", nil, "mock", false)
+	m.SetRuns(runs)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 8})
+	m.Update(press("2"))
+	m.Update(press("j"))
+	m.Update(press("j"))
+	m.Update(press("o"))
+	m.View() // must not panic
+}
+
+func TestOpenRunAndCursorKeptByIDWhenRunsAreReadAgain(t *testing.T) {
+	runs := recordRuns(t,
+		map[string]any{"sender": "carol", "message": "hi"},
+		map[string]any{"sender": "boss", "message": "urgent"},
+	)
+	m, _ := New("testdata/inbox.yaml", nil, "mock", false)
+	m.SetRuns(runs)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 44})
+	m.Update(press("2"))
+	m.Update(press("j"))
+	m.Update(press("enter")) // opens carol's run
+	open := m.replay.ID
+	// A new run is recorded, so the newest-first list shifts by one.
+	f, _ := flow.Load("testdata/inbox.yaml")
+	b, _ := backend.New(f.Backends["mock"])
+	file, _ := os.OpenFile(runs, os.O_APPEND|os.O_WRONLY, 0o644)
+	rec := trace.NewWriter(file)
+	id := trace.NewID()
+	in := map[string]any{"sender": "dan", "message": "new"}
+	rec.Start(id, "testdata/inbox.yaml", "mock", in)
+	res, err := runner.Run(context.Background(), f, in, runner.Options{Backends: map[string]backend.Backend{"mock": b}, OnEvent: func(ev runner.Event) { rec.Step(id, ev) }})
+	rec.End(id, res, err)
+	file.Close()
+	m.loadRuns()
+	if m.replay == nil || m.replay.ID != open || m.runs[m.runCursor].ID != open {
+		t.Errorf("open=%v cursor on %v, want %s", m.replay, m.runs[m.runCursor].Input, open)
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "◀ open") {
+		t.Error("the open run should still be marked open")
+	}
+}
+
+func TestAskRefusesAfterTheModelChanged(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	writeFlow(t, path, []byte(`threshold: 0.9
+nodes:
+  a: {bool: "Reply to {{who}}?", then: {yes: b, no: b, unsure: ask}}
+  ask: {bool: "Ask?", then: {_: b}}
+  b: {action: log, message: m}
+---
+models: {one: {url: mock, answers: {a: yes}}, two: {url: mock}}
+`), 0o644)
+	os.MkdirAll(filepath.Join(dir, "f.tests"), 0o755)
+	os.WriteFile(filepath.Join(dir, "f.tests", "ann.yaml"), []byte("input: {who: ann}\n"), 0o644)
+	m, _ := New(path, nil, "", true)
+	m.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
+	_, cmd := m.Update(press("R"))
+	pumpGrid(t, m, cmd)
+	m.Update(press("]"))
+	m.Update(press("]"))
+	if m.grid.rows[0].needs == "" {
+		t.Fatal("want a ? row")
+	}
+	m.Update(press("b"))
+	m.Update(press("j"))
+	m.Update(press("enter")) // two decides now
+	m.Update(press("g"))
+	if cmd := m.askMissing(); cmd != nil || !strings.Contains(m.flash, "came from one; R runs it again with two") {
+		t.Errorf("A after switching models: flash=%q", m.flash)
 	}
 }

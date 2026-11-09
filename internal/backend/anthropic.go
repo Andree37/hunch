@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -25,7 +26,6 @@ import (
 type anthropicChat struct {
 	client  anthropic.Client
 	model   string
-	keyErr  error // no usable key for Anthropic's own API
 	timeout time.Duration
 	opts    map[string]any
 }
@@ -36,11 +36,14 @@ func newAnthropic(cfg flow.BackendConfig) (*chatBackend, error) {
 	if model == "" {
 		return nil, fmt.Errorf("backend %q: model is required (the model ID)", cfg.Name)
 	}
-	key, keyErr := apiKey(o)
+	key, err := apiKey(o)
+	if err != nil {
+		return nil, fmt.Errorf("model %q: %w", cfg.Name, err)
+	}
 	base := optString(o, "base_url", "")
 	// Anthropic's own API needs a key; a proxy may add its own auth.
-	if keyErr == nil && key == "" && (base == "" || strings.Contains(base, "api.anthropic.com")) {
-		keyErr = fmt.Errorf("no key: add key: to this model in hunch.yaml")
+	if key == "" && isAnthropicAPI(base) {
+		return nil, fmt.Errorf("model %q: no key: add key: to it in hunch.yaml", cfg.Name)
 	}
 	opts := []option.RequestOption{option.WithoutEnvironmentDefaults()}
 	if key != "" {
@@ -52,7 +55,6 @@ func newAnthropic(cfg flow.BackendConfig) (*chatBackend, error) {
 	m := &anthropicChat{
 		client:  anthropic.NewClient(opts...),
 		model:   model,
-		keyErr:  keyErr,
 		timeout: optSeconds(o, "timeout", 120),
 		opts:    o,
 	}
@@ -60,9 +62,6 @@ func newAnthropic(cfg flow.BackendConfig) (*chatBackend, error) {
 }
 
 func (m *anthropicChat) chat(ctx context.Context, r chatRequest) (string, float64, error) {
-	if m.keyErr != nil {
-		return "", 0, m.keyErr
-	}
 	if m.timeout > 0 { // 0 means no limit
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, m.timeout)
@@ -91,4 +90,14 @@ func (m *anthropicChat) chat(ctx context.Context, r chatRequest) (string, float6
 		}
 	}
 	return b.String(), cost, nil
+}
+
+// isAnthropicAPI reports whether base is Anthropic's own API (or unset,
+// which means it), as opposed to a proxy or gateway.
+func isAnthropicAPI(base string) bool {
+	if base == "" {
+		return true
+	}
+	u, err := url.Parse(base)
+	return err == nil && strings.EqualFold(u.Hostname(), "api.anthropic.com")
 }
