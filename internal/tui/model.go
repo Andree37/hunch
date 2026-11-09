@@ -123,7 +123,8 @@ type Model struct {
 	replayK     int        // how many of its steps are shown
 	live        bool       // http nodes really send; off by default
 
-	help bool // the key list covers the screen
+	help   bool // the key list covers the screen
+	detail bool // the selected step covers the screen
 
 	// Steps of a run appear one at a time, each answer's bar filling in.
 	record        bool      // keep runs next to the flow; off in tests
@@ -431,6 +432,19 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.detail {
+		switch msg.String() {
+		case "esc", "enter", "q", "backspace":
+			m.detail = false
+		case "j", "down":
+			m.nodeScroll++
+		case "k", "up":
+			m.nodeScroll = max(m.nodeScroll-1, 0)
+		case "ctrl+c":
+			return m, tea.Quit
+		}
+		return m, nil
+	}
 	switch msg.String() {
 	case "?":
 		m.help = true
@@ -546,6 +560,8 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.flash = "backend: " + m.backend
 	case "enter", "e":
 		switch {
+		case (m.focus == focusFlow || m.focus == focusNode) && m.selected() != nil:
+			m.detail, m.nodeScroll = true, 0
 		case m.focus == focusInputs && len(m.inputs) > 0:
 			return m, m.editInput()
 		case m.focus == focusTests && m.showRuns && len(m.runs) > 0:

@@ -57,6 +57,8 @@ func (m *Model) View() string {
 	switch {
 	case m.help:
 		body = m.helpView(bodyH)
+	case m.detail:
+		body = pane(m.stepTitle(), m.scrolledStepLines(m.width-4, bodyH-3), m.width, bodyH, true)
 	case m.editing == editValue:
 		body = m.editorView(bodyH)
 	default:
@@ -232,6 +234,8 @@ func (m *Model) footerBar() string {
 	switch {
 	case m.help:
 		keys = "any key closes"
+	case m.detail:
+		keys = "j/k scroll · esc back"
 	case m.editing == editKey || m.editing == editCaseName || m.editing == editRunsPath:
 		keys = "enter ok · esc cancel"
 	case m.editing == editPick:
@@ -251,7 +255,7 @@ func (m *Model) footerBar() string {
 	case m.focus == focusNode:
 		keys = "j/k scroll · r run · ? keys"
 	default:
-		keys = "j/k select · r run · s step · m " + m.otherView() + " · ? keys"
+		keys = "j/k select · enter open step · r run · m " + m.otherView() + " · ? keys"
 	}
 	return bar(" "+keys, m.flash+" ", m.width)
 }
@@ -403,12 +407,25 @@ func (m *Model) storyLines(w int) (lines []string, rowLine []int) {
 		}
 		ev, ran := m.eventFor(id)
 		switch {
-		case n.Kind == flow.Action || n.Kind == flow.Switch:
+		case n.Kind == flow.Switch:
 			detail := nodeDetail(n, ev, ran)
-			if ran && n.Kind == flow.Switch && ev.Next != "" {
+			if ran && ev.Next != "" {
 				detail += m.nextMark(ev)
 			}
 			lines = append(lines, head+"  "+detail+m.expectMark(id))
+		case n.Kind == flow.Action:
+			detail := nodeDetail(n, ev, ran)
+			full := actionText(n, ev, ran)
+			if lipgloss.Width(head)+2+lipgloss.Width(detail) <= w && !strings.Contains(strings.TrimSpace(full), "\n") {
+				lines = append(lines, head+"  "+detail+m.expectMark(id))
+				break
+			}
+			// Too long for one line: the output goes underneath, wrapped.
+			lines = append(lines, head+m.expectMark(id))
+			if full == "" {
+				full = detail
+			}
+			lines = append(lines, clip(wrapAll(full, w-len(indent)), 4, indent)...)
 		case n.Kind == flow.Questions:
 			lines = append(lines, head+m.nextMark(ev)+m.expectMark(id))
 			lines = append(lines, indent+sDim.Render(fmt.Sprintf("%d questions in one call", len(n.Questions))))
@@ -422,7 +439,9 @@ func (m *Model) storyLines(w int) (lines []string, rowLine []int) {
 				text = ev.Asked[0]
 			}
 			lines = append(lines, head+m.nextMark(ev)+m.expectMark(id))
-			lines = append(lines, indent+sDim.Render(strings.Join(strings.Fields(text), " ")))
+			for _, l := range clip(wrap(strings.Join(strings.Fields(text), " "), w-len(indent)), 2, indent) {
+				lines = append(lines, sDim.Render(l))
+			}
 			if ran && len(ev.Decisions) > 0 {
 				lines = append(lines, indent+m.verdict(n, q, ev.Decisions[0], ev, w-len(indent), m.fill(i)))
 			}
@@ -435,7 +454,7 @@ func (m *Model) storyLines(w int) (lines []string, rowLine []int) {
 		case r.current == id && !ran:
 			lines = append(lines, indent+sYellow.Render(fmt.Sprintf("%s asking… %.1fs", m.spinner(), time.Since(r.nodeAt).Seconds())))
 		}
-		if n.Kind != flow.Action && n.Kind != flow.Switch {
+		if n.Kind != flow.Switch {
 			lines = append(lines, "")
 		}
 	}
@@ -454,13 +473,7 @@ func (m *Model) storyLines(w int) (lines []string, rowLine []int) {
 	case !r.done && r.paused == "":
 		lines = append(lines, sYellow.Render("◐ running…"))
 	case r.done:
-		last := r.path[len(r.path)-1]
-		end := sGreen.Render("■ ended at ") + sBold.Render(last)
-		if n := m.flow.Node(last); n != nil && n.Kind == flow.Action {
-			ev, _ := m.eventFor(last)
-			end += "  " + nodeDetail(n, ev, true)
-		}
-		lines = append(lines, end)
+		lines = append(lines, sGreen.Render("■ ended at ")+sBold.Render(r.path[len(r.path)-1]))
 	}
 	// Expectations about nodes the run never reached.
 	for _, res := range m.activeResults() {
@@ -472,6 +485,49 @@ func (m *Model) storyLines(w int) (lines []string, rowLine []int) {
 		lines = append(lines, "", sDim.Render("mock makes its answers up, so tests fail on it. b switches backend."))
 	}
 	return lines, rowLine
+}
+
+// actionText is the whole of what an action produced, when it is text
+// worth reading in full: a message, written text or command output.
+func actionText(n *flow.Node, ev runner.Event, ran bool) string {
+	if !ran {
+		return ""
+	}
+	out, _ := ev.Output.(map[string]any)
+	switch n.Action.Type {
+	case flow.ActLog:
+		return tmpl.Format(out["message"])
+	case flow.ActLLM:
+		return "✎ " + tmpl.Format(out["text"])
+	case flow.ActShell:
+		if asInt(out["exit_code"]) != 0 {
+			return ""
+		}
+		return "✓ " + tmpl.Format(out["stdout"])
+	}
+	return ""
+}
+
+// wrapAll wraps text to w, keeping its own line breaks.
+func wrapAll(s string, w int) []string {
+	var lines []string
+	for _, para := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+		lines = append(lines, wrap(para, w)...)
+	}
+	return lines
+}
+
+// clip keeps the first n lines, indented, and says how to see the rest.
+func clip(lines []string, n int, indent string) []string {
+	out := make([]string, 0, n+1)
+	for i, l := range lines {
+		if i == n {
+			out = append(out, indent+sDim.Render(fmt.Sprintf("+%d more lines · enter shows all", len(lines)-n)))
+			break
+		}
+		out = append(out, indent+l)
+	}
+	return out
 }
 
 // inputQuote shows the run's input at the top of the story: a single text

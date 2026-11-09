@@ -494,6 +494,32 @@ func TestTUIRunsAreRecorded(t *testing.T) {
 	}
 }
 
+// Long output is wrapped under its step, and enter opens the step in full.
+func TestLongOutputWrapsAndOpens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f.yaml")
+	os.WriteFile(path, []byte(`nodes:
+  say: {action: log, message: "{{text}}"}
+`), 0o644)
+	long := strings.Repeat("the fridge is in the oven ", 30) + "END"
+	m, _ := New(path, map[string]any{"text": long}, "", false)
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	_, cmd := m.Update(press("r"))
+	drive(t, m, cmd)
+	screen := ansi.Strip(m.View())
+	if !strings.Contains(screen, "more lines · enter shows all") {
+		t.Errorf("long output should wrap, then point to enter:\n%s", screen)
+	}
+	m.Update(press("1"))
+	m.Update(press("enter"))
+	if !m.detail || !strings.Contains(ansi.Strip(m.View()), "END") {
+		t.Errorf("enter should show the whole step:\n%s", ansi.Strip(m.View()))
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.detail {
+		t.Error("esc should close the step")
+	}
+}
+
 func TestHelp(t *testing.T) {
 	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
