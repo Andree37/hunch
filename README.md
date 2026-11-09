@@ -128,6 +128,30 @@ write `key: $SOME_VAR` to read one from the environment. Chat models report
 their own confidence, so check thresholds that depend on it against your
 tests.
 
+#### Example: Laya in an Azure Container App
+
+[Laya](https://github.com/NandhaKishorM/laya) is a small open decision model.
+Its server, `laya-serve` (`pip install "laya[serve]"`), speaks the same API
+as Jev, so hunch only needs its address. In the container app:
+
+- run `laya-serve`, listening on port 8000 (ingress target port 8000)
+- set `LAYA_API_KEY` to a secret, so only callers with the key get answers
+- optionally `LAYA_MODELS=english` to load one model instead of three
+
+Then in `hunch.yaml`, the app's URL plus `/v1/systemone`, and the same key:
+
+```yaml
+default: laya
+
+models:
+  laya: {url: https://my-laya.kindhill-1234.westeurope.azurecontainerapps.io/v1/systemone, key: the-laya-api-key}
+  jev:  {url: https://api.typesafe.ai/v1/systemone, key: tsk-...}
+```
+
+`hunch test examples/hello.yaml` now decides with Laya; `--model jev` (or `b`
+in the TUI) switches back. To keep the key out of the file, write
+`key: $LAYA_API_KEY` and set that variable instead.
+
 ### 5. Explore it in the TUI
 
 ```sh
