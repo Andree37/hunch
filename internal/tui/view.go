@@ -943,7 +943,7 @@ func (m *Model) casesTitle() string {
 	case m.showRuns:
 		return paneTitle(2, fmt.Sprintf("Recorded runs (%d)", len(m.runs)), "t tests")
 	case m.runsPath != "":
-		return paneTitle(2, "Tests", "t recorded runs")
+		return paneTitle(2, "Tests", fmt.Sprintf("t recorded runs (%d)", len(m.runs)))
 	}
 	return paneTitle(2, "Tests", "")
 }

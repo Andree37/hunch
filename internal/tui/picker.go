@@ -244,7 +244,7 @@ func (a *App) View() string {
 func RunApp(a *App) error {
 	animations = true
 	if a.main != nil {
-		a.main.animate = true
+		a.main.animate, a.main.record = true, true
 	}
 	_, err := tea.NewProgram(a, tea.WithAltScreen()).Run()
 	return err

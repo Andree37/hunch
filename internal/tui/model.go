@@ -126,6 +126,7 @@ type Model struct {
 	help bool // the key list covers the screen
 
 	// Steps of a run appear one at a time, each answer's bar filling in.
+	record        bool      // keep runs next to the flow; off in tests
 	animate       bool      // off in tests, so a finished run shows whole
 	reveal        int       // how many steps of the run are on screen
 	revealAt      time.Time // when the last of them appeared
@@ -140,7 +141,7 @@ type Model struct {
 // first case's input is loaded instead. backendName overrides the flow's
 // default backend.
 func New(path string, state map[string]any, backendName string, fromCase bool) (*Model, error) {
-	m := &Model{path: path, backend: backendName, active: -1, results: map[string][]cases.Result{}, animate: animations}
+	m := &Model{path: path, backend: backendName, active: -1, results: map[string][]cases.Result{}, animate: animations, record: animations}
 	for _, k := range slices.Sorted(maps.Keys(state)) {
 		m.inputs = append(m.inputs, input{k, tmpl.Format(state[k])})
 	}
@@ -397,6 +398,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.run.current, m.run.paused = "", ""
 		m.checkRun()
+		if m.record && m.runsPath == m.flow.RunsLocation() {
+			m.runsMod = time.Time{} // list them again, with this run
+			return m, m.refreshRuns()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -864,8 +869,14 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 		}
 	}
 	ctx = backend.WithStatus(ctx, func(note string) { send(statusMsg{id, note}) })
+	// Record the run next to the flow, like hunch run does, so it shows up
+	// with the flow's recorded runs.
+	rec, closeRec := m.recorder(ctx)
+	recID := trace.NewID()
+	rec.Start(recID, m.path, m.backend, state)
 	go func() {
 		defer close(ch)
+		defer closeRec()
 		res, err := runner.Run(ctx, &f, state, runner.Options{
 			Backends: backends,
 			Stdout:   io.Discard,
@@ -889,14 +900,35 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 				}
 			},
 			OnStart: func(node string) { send(startMsg{id, node}) },
-			OnEvent: func(ev runner.Event) { send(eventMsg{id, ev}) },
+			OnEvent: func(ev runner.Event) {
+				rec.Step(recID, ev)
+				send(eventMsg{id, ev})
+			},
 		})
+		if ctx.Err() == nil { // a stopped or replaced run isn't kept
+			rec.End(recID, res, err)
+		}
 		// A cancelled run has been replaced; nobody is waiting for its end.
 		if ctx.Err() == nil {
 			ch <- doneMsg{id, res.State, err}
 		}
 	}()
 	return tea.Batch(m.next(), m.kick())
+}
+
+// recorder opens where this flow's runs are kept. With nowhere to record
+// (runs: off) it returns a nil writer, which records nothing.
+func (m *Model) recorder(ctx context.Context) (*trace.Writer, func()) {
+	loc := m.flow.RunsLocation()
+	if loc == "" || !m.record {
+		return nil, func() {}
+	}
+	w, c, err := trace.Open(ctx, loc, 0)
+	if err != nil {
+		m.flash = "can't record runs: " + err.Error()
+		return nil, func() {}
+	}
+	return w, func() { c.Close() }
 }
 
 // next waits for the current run's next message.
@@ -926,7 +958,7 @@ func (m *Model) state() map[string]any {
 }
 
 func Run(m *Model) error {
-	animations, m.animate = true, true
+	animations, m.animate, m.record = true, true, true
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }

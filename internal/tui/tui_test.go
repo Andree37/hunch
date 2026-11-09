@@ -472,6 +472,28 @@ func TestStepsAppearOneAtATime(t *testing.T) {
 	}
 }
 
+// Runs made in the TUI are recorded next to the flow and listed with its runs.
+func TestTUIRunsAreRecorded(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	src, _ := os.ReadFile("testdata/inbox.yaml")
+	os.WriteFile(path, src, 0o644)
+	m, err := New(path, map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.record = true
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	_, cmd := m.Update(press("r"))
+	drive(t, m, cmd)
+	if err := m.loadRuns(); err != nil || len(m.runs) != 1 || m.runs[0].Input["sender"] != "carol" {
+		t.Fatalf("want the run recorded: err=%v runs=%d", err, len(m.runs))
+	}
+	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "t recorded runs (1)") {
+		t.Errorf("tests pane should count the recorded run:\n%s", screen)
+	}
+}
+
 func TestHelp(t *testing.T) {
 	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
