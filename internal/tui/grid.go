@@ -346,7 +346,7 @@ func (m *Model) gridLines(w, h int) []string {
 	for _, r := range g.rows {
 		nameW = max(nameW, lipgloss.Width(r.name))
 	}
-	nameW = min(nameW, 30)
+	nameW = min(max(nameW, len("threshold")), 30)
 	widths := make([]int, len(cols))
 	for i, n := range cols {
 		widths[i] = lipgloss.Width(n.ID)

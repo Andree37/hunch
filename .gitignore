@@ -25,7 +25,8 @@ go.work
 go.work.sum
 
 # models and their keys (see hunch.yaml in docs/reference.md)
-/hunch.yaml
+hunch.yaml
+!internal/tui/testdata/hunch.yaml
 .env
 
 # Editor/IDE

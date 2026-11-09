@@ -128,7 +128,7 @@ func (m *Model) updateModels(key string) tea.Cmd {
 	case "k", "up":
 		m.modelCursor = max(m.modelCursor-1, 0)
 	case "enter":
-		m.backend = names[m.modelCursor]
+		m.backend, m.pickedModel = names[m.modelCursor], true
 		m.picking = false
 		m.flash = "deciding with " + m.backend + " · r or R to run"
 	case "w":

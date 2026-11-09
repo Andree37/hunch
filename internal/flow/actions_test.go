@@ -122,16 +122,16 @@ models:
 		t.Errorf("default %q, order %v", p.Default, p.Order)
 	}
 
-	t.Setenv("HUNCH_TEST_KEY", "from-env")
-	p, err = ParseProject([]byte("models: {j: {url: http://x/v1/systemone, key: $HUNCH_TEST_KEY}}"))
-	if err != nil || p.Models["j"].Options["api_key"] != "from-env" {
+	// $NAME is read when the model is used, so an unset one doesn't stop
+	// flows that never use that model.
+	p, err = ParseProject([]byte("models: {j: {url: http://x/v1/systemone, key: $NOPE_UNSET}}"))
+	if err != nil || p.Models["j"].Options["api_key_env"] != "NOPE_UNSET" {
 		t.Errorf("$ key: %v %v", err, p.Models["j"].Options)
 	}
 	for src, want := range map[string]string{
-		"models: {x: http://localhost:11434}":                         "can't tell what http://localhost:11434 speaks",
-		"models: {x: {key: k}}":                                       "needs a url",
-		"models: {j: {url: http://x/v1/systemone, key: $NOPE_UNSET}}": "$NOPE_UNSET is not set",
-		"default: nope\nmodels: {}":                                   "not one of the models",
+		"models: {x: http://localhost:11434}": "can't tell what http://localhost:11434 speaks",
+		"models: {x: {key: k}}":               "needs a url",
+		"default: nope\nmodels: {}":           "not one of the models",
 	} {
 		if _, err := ParseProject([]byte(src)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want %q", src, err, want)

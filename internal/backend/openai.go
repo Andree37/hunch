@@ -22,6 +22,7 @@ import (
 //	             follow (response_format). Set false if a server rejects it.
 type openAIChat struct {
 	url, model, key, keyHeader string
+	keyErr                     error
 	structured                 bool
 	opts                       map[string]any
 	client                     *http.Client
@@ -33,10 +34,12 @@ func newOpenAI(cfg flow.BackendConfig) (*chatBackend, error) {
 	if model == "" {
 		return nil, fmt.Errorf("model %q: say which model the server should run (model: ...)", cfg.Name)
 	}
+	key, keyErr := apiKey(o)
 	m := &openAIChat{
 		url:        optString(o, "endpoint", "https://api.openai.com/v1/chat/completions"),
 		model:      model,
-		key:        optString(o, "api_key", ""),
+		key:        key,
+		keyErr:     keyErr,
 		keyHeader:  optString(o, "key_header", ""),
 		structured: o["structured"] != false,
 		opts:       o,
@@ -46,6 +49,9 @@ func newOpenAI(cfg flow.BackendConfig) (*chatBackend, error) {
 }
 
 func (m *openAIChat) chat(ctx context.Context, r chatRequest) (string, float64, error) {
+	if m.keyErr != nil {
+		return "", 0, m.keyErr
+	}
 	type msg struct {
 		Role    string `json:"role"`
 		Content string `json:"content"`

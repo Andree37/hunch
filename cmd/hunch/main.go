@@ -93,12 +93,8 @@ func cmdRun(ctx context.Context, args []string) error {
 	if *asJSON {
 		progress = os.Stderr
 	}
-	f, err := loadChecked(path, os.Stderr)
+	f, err := loadChecked(path, *backendName, *writerName, os.Stderr)
 	if err != nil {
-		return err
-	}
-
-	if err := pickBackends(f, path, *backendName, *writerName); err != nil {
 		return err
 	}
 
@@ -255,11 +251,8 @@ func cmdTest(ctx context.Context, args []string) error {
 	}
 	path, only := paths[0], paths[1:]
 
-	f, err := loadChecked(path, os.Stderr)
+	f, err := loadChecked(path, *backendName, *writerName, os.Stderr)
 	if err != nil {
-		return err
-	}
-	if err := pickBackends(f, path, *backendName, *writerName); err != nil {
 		return err
 	}
 	all, err := cases.Load(cases.Dir(path))
@@ -456,10 +449,14 @@ func printResults(w io.Writer, rs []cases.Result) {
 	}
 }
 
-// loadChecked loads a flow and prints validation issues, failing on errors.
-func loadChecked(path string, w io.Writer) (*flow.Flow, error) {
+// loadChecked loads a flow, applies --model and --writer, and checks it
+// with those, so the flags can fix what the defaults would get wrong.
+func loadChecked(path, decider, writer string, w io.Writer) (*flow.Flow, error) {
 	f, err := flow.Load(path)
 	if err != nil {
+		return nil, err
+	}
+	if err := pickBackends(f, path, decider, writer); err != nil {
 		return nil, err
 	}
 	issues := validate.Flow(f)

@@ -258,3 +258,10 @@ nodes:
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestTriedThresholdNeverReachesZero(t *testing.T) {
+	f, _ := parseFlow("nodes: {a: {bool: q, threshold: 0.05, then: {_: a}}}")
+	if got := Threshold(f, f.Node("a"), -0.5); got != 0.01 {
+		t.Errorf("got %v, want 0.01 (0 reads as unset in a flow file)", got)
+	}
+}

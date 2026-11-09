@@ -36,33 +36,45 @@ type Project struct {
 	Order   []string // model names in file order
 }
 
-// FindProject returns the hunch.yaml in dir or the nearest folder above it,
-// or nil when there's none.
-func FindProject(dir string) (*Project, error) {
+// ProjectPath is the hunch.yaml in dir or the nearest folder above it, or
+// "" when there's none.
+func ProjectPath(dir string) (string, error) {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	for {
 		path := filepath.Join(dir, ProjectFile)
-		data, err := os.ReadFile(path)
-		if err == nil {
-			p, err := ParseProject(data)
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", path, err)
-			}
-			p.Path = path
-			return p, nil
-		}
-		if !os.IsNotExist(err) {
-			return nil, err
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		} else if !os.IsNotExist(err) {
+			return "", err
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return nil, nil
+			return "", nil
 		}
 		dir = parent
 	}
+}
+
+// FindProject reads the hunch.yaml in dir or the nearest folder above it,
+// or returns nil when there's none.
+func FindProject(dir string) (*Project, error) {
+	path, err := ProjectPath(dir)
+	if err != nil || path == "" {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	p, err := ParseProject(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	p.Path = path
+	return p, nil
 }
 
 func ParseProject(data []byte) (*Project, error) {
@@ -135,13 +147,13 @@ func modelConfig(name string, n *yaml.Node) (BackendConfig, error) {
 	delete(opts, "url")
 	if k, ok := opts["key"].(string); ok {
 		delete(opts, "key")
+		// $NAME is read when the model is used, so a missing variable
+		// only stops the models that need it.
 		if env, isRef := strings.CutPrefix(k, "$"); isRef {
-			k = os.Getenv(env)
-			if k == "" {
-				return cfg, fmt.Errorf("key: $%s is not set", env)
-			}
+			opts["api_key_env"] = env
+		} else {
+			opts["api_key"] = k
 		}
-		opts["api_key"] = k
 	}
 	if raw == "" || raw == "mock" {
 		if name != "mock" && raw != "mock" {

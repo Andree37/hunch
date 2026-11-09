@@ -255,3 +255,25 @@ func TestJevDefaultsByHost(t *testing.T) {
 		}
 	}
 }
+
+func TestKeyFromAVariableIsReadWhenUsed(t *testing.T) {
+	var auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		io.WriteString(w, `{"answers": {"is_bug": {"noul": 0.9}}}`)
+	}))
+	defer srv.Close()
+	cfg := flow.BackendConfig{Name: "j", Kind: "jev", Options: map[string]any{"url": srv.URL, "api_key_env": "HUNCH_TEST_LATE_KEY"}}
+	b, err := New(cfg)
+	if err != nil {
+		t.Fatalf("an unset variable mustn't stop New: %v", err)
+	}
+	if _, err := b.Decide(context.Background(), nil, tutorialQuestions[:1]); err == nil || !strings.Contains(err.Error(), "$HUNCH_TEST_LATE_KEY is not set") {
+		t.Errorf("unset: err = %v", err)
+	}
+	t.Setenv("HUNCH_TEST_LATE_KEY", "sk-late")
+	b, _ = New(cfg)
+	if _, err := b.Decide(context.Background(), nil, tutorialQuestions[:1]); err != nil || auth != "Bearer sk-late" {
+		t.Errorf("set: err=%v auth=%q", err, auth)
+	}
+}

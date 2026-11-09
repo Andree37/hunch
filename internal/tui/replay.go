@@ -335,7 +335,7 @@ func (m *Model) runLines(w, h int) []string {
 		if m.replay == tr {
 			line += sTitle.Render("  ◀ open")
 		}
-		if m.compareMark == tr {
+		if m.compareMark == tr.ID {
 			line += sYellow.Render("  ◆ compare")
 		}
 		lines = append(lines, line, "    "+sDim.Render(inputSummary(tr.Input)))

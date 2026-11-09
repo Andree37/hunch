@@ -32,19 +32,21 @@ func (m *Model) markForCompare() {
 		return
 	}
 	tr := m.runs[min(m.runCursor, len(m.runs)-1)]
+	// Marked by id: the runs list is rebuilt when it's read again.
+	i := slices.IndexFunc(m.runs, func(r *trace.Run) bool { return r.ID == m.compareMark })
 	switch {
-	case m.compareMark == tr:
-		m.compareMark = nil
+	case m.compareMark == tr.ID:
+		m.compareMark = ""
 		m.flash = "unmarked"
-	case m.compareMark == nil:
-		m.compareMark = tr
+	case i < 0:
+		m.compareMark = tr.ID
 		m.flash = "marked · c on another run compares the two"
 	default:
-		a, b := m.compareMark, tr
+		a, b := m.runs[i], tr
 		if b.Time.Before(a.Time) {
 			a, b = b, a // older on the left
 		}
-		m.compare, m.compareMark = &comparison{a: a, b: b}, nil
+		m.compare, m.compareMark = &comparison{a: a, b: b}, ""
 	}
 }
 

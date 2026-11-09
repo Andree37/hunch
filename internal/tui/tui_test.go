@@ -645,7 +645,7 @@ models: {m: {url: mock, answers: {a: ` + answer + `}}}
 	_, cmd := m.Update(press("R"))
 	pumpGrid(t, m, cmd)
 	screen := ansi.Strip(m.View())
-	for _, want := range []string{"All tests", "✗ 1/2 passed", "      test  a", "✓ ann   yes ✓", "✗ bob   yes ✗", "the test expects a = no, but got yes"} {
+	for _, want := range []string{"All tests", "✗ 1/2 passed", "      test       a", "✓ ann        yes ✓", "✗ bob        yes ✗", "the test expects a = no, but got yes"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("grid missing %q:\n%s", want, screen)
 		}
@@ -1520,5 +1520,51 @@ func TestModelListChecksEachModel(t *testing.T) {
 	}
 	if _, cmd := m.Update(press("c")); cmd == nil || m.checking() == false {
 		t.Error("c should check again")
+	}
+}
+
+func TestTUIFollowsANewDefaultUnlessAModelWasPicked(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	project := filepath.Join(dir, "hunch.yaml")
+	writeFlow(t, path, []byte("nodes: {a: {bool: q, then: {_: b}}, b: {action: log, message: m}}\n---\ndefault: one\nmodels: {one: {url: mock}, two: {url: mock}}\n"), 0o644)
+	m, _ := New(path, nil, "", false)
+	save := func(src string, at int) {
+		os.WriteFile(project, []byte(src), 0o644)
+		later := time.Now().Add(time.Duration(at) * time.Second)
+		os.Chtimes(project, later, later)
+		m.Update(tickMsg{})
+	}
+	save("default: two\nmodels: {one: {url: mock}, two: {url: mock}}\n", 10)
+	if m.backend != "two" {
+		t.Errorf("should follow the new default: %q", m.backend)
+	}
+	m.Update(press("b"))
+	m.Update(press("k"))
+	m.Update(press("enter")) // picks one
+	save("default: two\nmodels: {one: {url: mock}, two: {url: mock}, three: {url: mock}}\n", 20)
+	if m.backend != "one" {
+		t.Errorf("a picked model should stay: %q", m.backend)
+	}
+}
+
+func TestCompareMarkSurvivesReadingRunsAgain(t *testing.T) {
+	runs := recordRuns(t,
+		map[string]any{"sender": "carol", "message": "hi"},
+		map[string]any{"sender": "boss", "message": "urgent"},
+	)
+	m, _ := New("testdata/inbox.yaml", nil, "mock", false)
+	m.SetRuns(runs)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 44})
+	m.Update(press("2"))
+	m.Update(press("c"))
+	m.loadRuns() // new *trace.Run values, same ids
+	if !strings.Contains(ansi.Strip(m.View()), "◆ compare") {
+		t.Error("the mark should survive the runs being read again")
+	}
+	m.Update(press("j"))
+	m.Update(press("c"))
+	if m.compare == nil || m.compare.a.ID == m.compare.b.ID {
+		t.Errorf("want two different runs compared: %+v", m.compare)
 	}
 }

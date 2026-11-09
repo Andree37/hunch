@@ -5,6 +5,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/Andree37/hunch/internal/flow"
 )
@@ -85,4 +86,20 @@ func ReportStatus(ctx context.Context, format string, args ...any) {
 	if fn, ok := ctx.Value(statusKey{}).(func(string)); ok {
 		fn(fmt.Sprintf(format, args...))
 	}
+}
+
+// apiKey is a model's key: written in hunch.yaml, or read from the
+// variable it names (key: $NAME). A missing variable is an error only for
+// a model that's used, so it's returned rather than failing New.
+func apiKey(o map[string]any) (string, error) {
+	if k := optString(o, "api_key", ""); k != "" {
+		return k, nil
+	}
+	if env := optString(o, "api_key_env", ""); env != "" {
+		if k := os.Getenv(env); k != "" {
+			return k, nil
+		}
+		return "", fmt.Errorf("$%s is not set (this model's key in hunch.yaml)", env)
+	}
+	return "", nil
 }

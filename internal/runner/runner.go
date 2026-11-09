@@ -195,12 +195,13 @@ func decideNode(ctx context.Context, f *flow.Flow, n *flow.Node, state map[strin
 }
 
 // Threshold is the threshold n routes on: the flow's own, or shifted
-// (rounded to hundredths, kept within 0 and 1) while another is tried.
+// (rounded to hundredths, kept within 0.01 and 1) while another is tried.
+// It never reaches 0, which a flow file reads as "not set".
 func Threshold(f *flow.Flow, n *flow.Node, shift float64) float64 {
 	if shift == 0 {
 		return f.ThresholdFor(n)
 	}
-	return min(max(math.Round((f.ThresholdFor(n)+shift)*100)/100, 0), 1)
+	return min(max(math.Round((f.ThresholdFor(n)+shift)*100)/100, 0.01), 1)
 }
 
 // seen picks the paths a node may see out of state, keyed by path. A path

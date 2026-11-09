@@ -25,7 +25,7 @@ import (
 type anthropicChat struct {
 	client  anthropic.Client
 	model   string
-	hasKey  bool
+	keyErr  error // no usable key for Anthropic's own API
 	timeout time.Duration
 	opts    map[string]any
 }
@@ -36,18 +36,23 @@ func newAnthropic(cfg flow.BackendConfig) (*chatBackend, error) {
 	if model == "" {
 		return nil, fmt.Errorf("backend %q: model is required (the model ID)", cfg.Name)
 	}
-	key := optString(o, "api_key", "")
+	key, keyErr := apiKey(o)
+	base := optString(o, "base_url", "")
+	// Anthropic's own API needs a key; a proxy may add its own auth.
+	if keyErr == nil && key == "" && (base == "" || strings.Contains(base, "api.anthropic.com")) {
+		keyErr = fmt.Errorf("no key: add key: to this model in hunch.yaml")
+	}
 	opts := []option.RequestOption{option.WithoutEnvironmentDefaults()}
 	if key != "" {
 		opts = append(opts, option.WithAPIKey(key))
 	}
-	if u := optString(o, "base_url", ""); u != "" {
-		opts = append(opts, option.WithBaseURL(u))
+	if base != "" {
+		opts = append(opts, option.WithBaseURL(base))
 	}
 	m := &anthropicChat{
 		client:  anthropic.NewClient(opts...),
 		model:   model,
-		hasKey:  key != "",
+		keyErr:  keyErr,
 		timeout: optSeconds(o, "timeout", 120),
 		opts:    o,
 	}
@@ -55,8 +60,8 @@ func newAnthropic(cfg flow.BackendConfig) (*chatBackend, error) {
 }
 
 func (m *anthropicChat) chat(ctx context.Context, r chatRequest) (string, float64, error) {
-	if !m.hasKey {
-		return "", 0, fmt.Errorf("no key: add key: to this model in hunch.yaml")
+	if m.keyErr != nil {
+		return "", 0, m.keyErr
 	}
 	if m.timeout > 0 { // 0 means no limit
 		var cancel context.CancelFunc

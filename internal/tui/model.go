@@ -131,11 +131,12 @@ type Model struct {
 	gridCursor int
 
 	picking     bool // the model list (b) covers the screen
+	pickedModel bool // chosen with --model or b, so a new default in hunch.yaml doesn't replace it
 	modelCursor int
 	checks      map[string]*modelCheck // whether each model answered, by name
 	checksFor   string                 // the hunch.yaml they were checked against
 	compare     *comparison            // two recorded runs side by side
-	compareMark *trace.Run             // the first run picked with c
+	compareMark string                 // id of the first run picked with c
 
 	help   bool // the key list covers the screen
 	detail bool // the selected step covers the screen
@@ -156,7 +157,7 @@ type Model struct {
 // first case's input is loaded instead. backendName overrides the flow's
 // default backend.
 func New(path string, state map[string]any, backendName string, fromCase bool) (*Model, error) {
-	m := &Model{path: path, backend: backendName, active: -1, results: map[string][]cases.Result{}, animate: animations, record: animations}
+	m := &Model{path: path, backend: backendName, pickedModel: backendName != "", active: -1, results: map[string][]cases.Result{}, animate: animations, record: animations}
 	for _, k := range slices.Sorted(maps.Keys(state)) {
 		m.inputs = append(m.inputs, input{k, tmpl.Format(state[k])})
 	}
@@ -211,10 +212,15 @@ func (m *Model) load() error {
 		return err
 	}
 	m.flow, m.loadErr = f, nil
-	// A model picked earlier may be gone from a changed hunch.yaml.
+	// A changed hunch.yaml: follow its default unless a model was picked,
+	// and notice a picked one that's gone.
+	if m.backend != "" && !m.pickedModel && m.backend != f.DefaultBackend {
+		m.flash = "deciding with " + f.DefaultBackend + ", the default in hunch.yaml"
+		m.backend = f.DefaultBackend
+	}
 	if _, ok := f.Backends[m.backend]; m.backend != "" && !ok {
 		m.flash = m.backend + " is no longer in hunch.yaml · deciding with " + f.DefaultBackend
-		m.backend = f.DefaultBackend
+		m.backend, m.pickedModel = f.DefaultBackend, false
 	}
 	if _, ok := f.Backends[m.writer]; m.writer != "" && !ok {
 		m.writer = ""
@@ -233,21 +239,15 @@ func (m *Model) load() error {
 // projectStamp names the hunch.yaml a flow would use and when it last
 // changed, so a save, a new file or a removed one shows up.
 func projectStamp(flowPath string) string {
-	dir, err := filepath.Abs(filepath.Dir(flowPath))
+	path, err := flow.ProjectPath(filepath.Dir(flowPath))
+	if err != nil || path == "" {
+		return ""
+	}
+	st, err := os.Stat(path)
 	if err != nil {
 		return ""
 	}
-	for {
-		p := filepath.Join(dir, flow.ProjectFile)
-		if st, err := os.Stat(p); err == nil {
-			return p + "@" + st.ModTime().String()
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
+	return path + "@" + st.ModTime().String()
 }
 
 // revalidate checks the flow with the inputs counted as state, so refs the
@@ -722,7 +722,7 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.revalidate()
 		}
 	case "w":
-		if m.flowView == viewGrid && len(m.shifts) > 0 {
+		if m.flowView == viewGrid && m.focus == focusFlow && len(m.shifts) > 0 {
 			m.keepThresholds()
 			return m, nil
 		}
