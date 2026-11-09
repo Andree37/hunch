@@ -133,10 +133,12 @@ nodes:
 
 - **Sending is a decision.** Put the "should this go out?" question before
   the `http` node, as above.
-- **Dry runs.** `hunch test` and the TUI never write: `http` nodes that
-  POST/PUT/PATCH/DELETE record the request they would make. GETs still run,
-  since they only read and later nodes need the data. Use `hunch test --live` or `L` in the TUI to send
-  for real. `hunch run` sends unless given `--dry-run`.
+- **Dry runs.** `hunch test` and the TUI never write: `shell` nodes record
+  the command they would run (with empty `stdout` and `exit_code` 0), and
+  `http` nodes that POST/PUT/PATCH/DELETE record the request they would make.
+  GETs still run, since they only read and later nodes need the data. Use
+  `hunch test --live` or `L` in the TUI to do it for real. `hunch run` does
+  unless given `--dry-run`.
 - **Secrets** go in `$VARS` in `url` and `headers`, read from the environment,
   so they never enter state or any model's prompt. Only `$VARS` written in
   the flow are expanded: a `$NAME` inside an input or an answer stays as it is.
@@ -228,7 +230,7 @@ curl -H "Authorization: Bearer $HOOK_TOKEN" \
 - Listens on `127.0.0.1:8080` unless `--addr` says otherwise.
 - `--token-env VAR` requires `Authorization: Bearer <$VAR>`.
 - Inputs are checked like everywhere else; bad or missing ones get a 400.
-- Live by default; `--dry-run` records writes instead of sending them.
+- Live by default; `--dry-run` records shell commands and http writes instead of doing them.
 - A failed run returns 500 with the error and `failed_at` node.
 - `--trace` records every run (see [Recording and replaying runs](#recording-and-replaying-runs));
   `GET /healthz` for checks.
@@ -514,7 +516,7 @@ recorded run · `F` flow picker · `q` quit
 - `hunch validate FLOW`: dangling routes, impossible branches, uncovered
   answers, unreachable nodes, loops, refs to nodes that haven't run yet.
 - `hunch tui [FLOW] [--backend name] [--writer name] [--set k=v]... [--state f.json] [--runs place]`: without FLOW, pick one
-- `hunch test FLOW [--backend name] [--live] [case...]`: run test cases, check expectations. `http` nodes don't send unless `--live`.
+- `hunch test FLOW [--backend name] [--live] [case...]`: run test cases, check expectations. `shell` and `http` write nodes only record unless `--live`.
 - `hunch tune FLOW [--runs file.jsonl] [--backend name] [--no-tests] [--all]`: see what each threshold would do.
 - `hunch serve FLOW [--addr host:port] [--backend name] [--writer name] [--dry-run] [--token-env VAR] [--trace file|dir|s3://...] [--dedupe-key T] [--dedupe-store dir|s3://...]`: run the flow for each webhook POST.
 - `hunch run FLOW [--backend name] [--case name] [--set k=v]... [--state f.json] [--trace f.jsonl] [--json] [--max-visits N]`

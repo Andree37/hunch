@@ -296,7 +296,7 @@ func (m *Model) helpView(h int) string {
 			{"R", "run every test, side by side; saving the flow or a test runs them again"},
 			{"g", "back to every test's results"}, {"s", "run one step at a time"}, {"x", "stop"},
 			{"m", "switch between the run and the map of the flow"},
-			{"b", "switch backend"}, {"L", "live or dry run: dry runs don't send http writes"},
+			{"b", "switch backend"}, {"L", "live or dry run: dry runs don't run shell or send http writes"},
 		}},
 		{"Move", [][2]string{
 			{"1 2 3 4", "run · tests · step · input"}, {"tab", "next pane"},
@@ -517,6 +517,9 @@ func actionText(n *flow.Node, ev runner.Event, ran bool) string {
 	case flow.ActLLM:
 		return "✎ " + tmpl.Format(out["text"])
 	case flow.ActShell:
+		if out["dry_run"] == true {
+			return "DRY RUN $ " + tmpl.Format(out["command"])
+		}
 		if asInt(out["exit_code"]) != 0 {
 			return ""
 		}
@@ -923,7 +926,7 @@ func (m *Model) actionLines(n *flow.Node, ev runner.Event, ran bool, w int) []st
 	}
 	out, _ := ev.Output.(map[string]any)
 	if out["dry_run"] == true {
-		lines = append(lines, sYellow.Render("dry run: nothing was sent"), "")
+		lines = append(lines, sYellow.Render("dry run: nothing was run or sent"), "")
 	}
 	for _, k := range slices.Sorted(maps.Keys(out)) {
 		if k == "dry_run" {

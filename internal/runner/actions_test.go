@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +135,22 @@ func TestShellTimeout(t *testing.T) {
 	_, err := runFlow(t, `nodes: {slow: {action: shell, run: "sleep 5", timeout: 0.2}}`, nil, false)
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestDryRunDoesntRunShell(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "ran")
+	res, err := runFlow(t, `nodes: {touch: {action: shell, run: "touch {{path}}"}}`,
+		map[string]any{"path": marker}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the command ran in a dry run")
+	}
+	out := res.State["touch"].(map[string]any)
+	if out["dry_run"] != true || !strings.Contains(out["command"].(string), "touch ") || out["exit_code"] != 0 {
+		t.Errorf("output = %v", out)
 	}
 }
 

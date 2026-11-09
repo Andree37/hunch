@@ -329,8 +329,15 @@ func TestActionRowsShowSlotsThenOutput(t *testing.T) {
 	_, cmd := m.Update(press("r"))
 	drive(t, m, cmd)
 	screen = ansi.Strip(m.View())
-	if !strings.Contains(screen, "✓ Block time to answer carol: hi") || !strings.Contains(screen, "■ ended at schedule") {
-		t.Errorf("want shell output after running:\n%s", screen)
+	if !strings.Contains(screen, "DRY RUN $ echo Block time to answer 'carol': 'hi'") || !strings.Contains(screen, "■ ended at schedule") {
+		t.Errorf("want the shell command recorded, not run, in a dry run:\n%s", screen)
+	}
+	m.Update(press("L"))
+	_, cmd = m.Update(press("r"))
+	drive(t, m, cmd)
+	screen = ansi.Strip(m.View())
+	if !strings.Contains(screen, "✓ Block time to answer carol: hi") {
+		t.Errorf("want shell output after a live run:\n%s", screen)
 	}
 }
 
@@ -350,7 +357,7 @@ func TestRunAndMapViews(t *testing.T) {
 	screen := ansi.Strip(m.View())
 	for _, want := range []string{
 		"1 Run", "message: hi", "1 ● worth_it  → intent", "Does this message from carol need a response",
-		"5 ● schedule", "■ ended at schedule", "✓ Block time to answer carol: hi",
+		"5 ● schedule", "■ ended at schedule", "DRY RUN $ echo Block time to answer 'carol': 'hi'",
 		"3 intent  choice · mock · threshold 0.60", "Under the 0.60 threshold (0.48), but there's no unsure",
 	} {
 		if !strings.Contains(screen, want) {

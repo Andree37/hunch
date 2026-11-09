@@ -121,7 +121,7 @@ type Model struct {
 	replay      *trace.Run // recorded run shown in the views
 	beforeRun   *snapshot  // what the views showed before a run was opened
 	replayK     int        // how many of its steps are shown
-	live        bool       // http nodes really send; off by default
+	live        bool       // shell and http nodes really run; off by default
 
 	grid       *gridRun // every test run at once, shown side by side
 	gridID     int
@@ -586,9 +586,9 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "L":
 		m.live = !m.live
 		if m.live {
-			m.flash = "LIVE: http nodes will really send"
+			m.flash = "LIVE: shell nodes run and http nodes send"
 		} else {
-			m.flash = "dry run: http nodes only record their request"
+			m.flash = "dry run: shell and http writes are only recorded"
 		}
 	case "b":
 		names := slices.Sorted(maps.Keys(m.flow.Backends))

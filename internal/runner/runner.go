@@ -24,7 +24,9 @@ type Options struct {
 	MaxSteps  int       // default 100
 	MaxVisits int       // per node, default 5
 	Stdout    io.Writer // shell action output
-	DryRun    bool      // http actions record their request instead of sending it
+	// DryRun records what would have happened instead of doing it: shell
+	// commands aren't run and http writes aren't sent. GETs still are.
+	DryRun bool
 	// Fake answers http nodes by name with a canned response, e.g. from a
 	// test case, instead of calling anything.
 	Fake map[string]FakeResponse
@@ -376,6 +378,10 @@ func actionNode(ctx context.Context, f *flow.Flow, n *flow.Node, state map[strin
 		})
 		if err != nil {
 			return err
+		}
+		if opts.DryRun {
+			ev.Output = map[string]any{"dry_run": true, "command": script, "stdout": "", "exit_code": 0}
+			return nil
 		}
 		var out bytes.Buffer
 		cmd := exec.CommandContext(ctx, "sh", "-c", script)

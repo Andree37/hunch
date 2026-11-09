@@ -32,7 +32,7 @@ func cmdServe(ctx context.Context, args []string) error {
 	addr := fs.String("addr", "127.0.0.1:8080", "address to listen on")
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
 	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
-	dryRun := fs.Bool("dry-run", false, "don't send http requests that write; record them instead")
+	dryRun := fs.Bool("dry-run", false, "don't run shell commands or send http writes; record them instead")
 	tokenEnv := fs.String("token-env", "", "require `Authorization: Bearer <token>` with the token read from this env var")
 	traceFile := fs.String("trace", "", "where to record runs: a .jsonl file, a directory, s3://bucket/prefix, or off (default: the flow's runs location)")
 	timeout := fs.Duration("timeout", 5*time.Minute, "longest a single run may take")

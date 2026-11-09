@@ -157,9 +157,9 @@ hold: {action: output, set: {action: needs_human, reply: "{{draft.text}}"}}
 | `http` | calls an API, with retries | `status`, `body` |
 | `output` | sets the flow's outputs | the values |
 
-`hunch test` and the TUI don't send http writes (POST, PUT, PATCH, DELETE);
-they show what would have been sent. Shell commands do run, so keep writes
-out of `shell` nodes you test. `hunch run` sends unless given `--dry-run`.
+`hunch test` and the TUI don't run shell commands or send http writes (POST,
+PUT, PATCH, DELETE); they show what would have been done. `--live` (or `L` in
+the TUI) does it for real. `hunch run` does it unless given `--dry-run`.
 
 ### 7. Run it on real events
 

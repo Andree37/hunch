@@ -35,8 +35,8 @@ usage:
              [--dedupe-key '{{record.id}}'] [--dedupe-store dir|s3://b/p] [--max-concurrent 4]
              [--timeout 5m] [--trace-max-mb 100]
 
-http nodes that write send for real in run and serve (unless --dry-run) and
-only record the request in test and the TUI (unless --live / L).
+shell nodes and http nodes that write run for real in run and serve (unless
+--dry-run) and are only recorded in test and the TUI (unless --live / L).
 serve runs FLOW for every POST /: the JSON body is the input, the reply the
 path taken and the outputs.
 
@@ -106,7 +106,7 @@ func cmdRun(ctx context.Context, args []string) error {
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
 	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
 	caseName := fs.String("case", "", "take input from this test case (--set still overrides)")
-	dryRun := fs.Bool("dry-run", false, "don't send http requests; record them instead")
+	dryRun := fs.Bool("dry-run", false, "don't run shell commands or send http writes; record them instead")
 	path, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -261,7 +261,7 @@ func cmdTest(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("test", flag.ExitOnError)
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
 	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
-	live := fs.Bool("live", false, "send http requests for real (default: record them only)")
+	live := fs.Bool("live", false, "run shell commands and send http writes for real (default: record them only)")
 	var paths []string
 	for {
 		if err := fs.Parse(args); err != nil {
@@ -544,6 +544,8 @@ func printEvent(w io.Writer, ev runner.Event) {
 		case out["text"] != nil:
 			first, _, _ := strings.Cut(tmpl.Format(out["text"]), "\n")
 			detail = fmt.Sprintf("wrote %q", first)
+		case out["dry_run"] == true && out["command"] != nil:
+			detail = fmt.Sprintf("dry run: $ %v", out["command"])
 		case out["dry_run"] == true:
 			detail = fmt.Sprintf("dry run: %v %v", out["method"], out["url"])
 		case out["faked"] == true:

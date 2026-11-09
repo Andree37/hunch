@@ -128,6 +128,9 @@ func actionView(a *flow.ActionSpec, ev runner.Event, ran bool) string {
 		if !ran {
 			return sDim.Render("$ ") + slots(a.Run)
 		}
+		if out["dry_run"] == true {
+			return sYellow.Render("DRY RUN ") + sDim.Render(fmt.Sprintf("$ %v", out["command"]))
+		}
 		code := asInt(out["exit_code"])
 		result := firstLine(tmpl.Format(out["stdout"]))
 		if code != 0 {
