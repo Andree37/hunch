@@ -1472,3 +1472,53 @@ func TestSavingHunchYamlReloadsTheModels(t *testing.T) {
 		t.Errorf("broken file: backend=%q flash=%q", m.backend, m.flash)
 	}
 }
+
+func TestModelListChecksEachModel(t *testing.T) {
+	locked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error": "invalid api key"}`, http.StatusUnauthorized)
+	}))
+	defer locked.Close()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	writeFlow(t, path, []byte("nodes: {a: {bool: q, then: {_: b}}, b: {action: log, message: m}}\n---\n"+
+		"default: mock\nmodels:\n  locked: "+locked.URL+"/v1/systemone\n  gone: http://127.0.0.1:1/v1/systemone\n"), 0o644)
+	m, err := New(path, nil, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
+	_, cmd := m.Update(press("b"))
+	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "checking") {
+		t.Errorf("want checks under way:\n%s", screen)
+	}
+	queue := []tea.Cmd{cmd}
+	for len(queue) > 0 {
+		c := queue[0]
+		queue = queue[1:]
+		if c == nil {
+			continue
+		}
+		switch msg := c().(type) {
+		case tea.BatchMsg:
+			queue = append(queue, msg...)
+		case checkMsg:
+			m.Update(msg)
+		}
+	}
+	screen := ansi.Strip(m.View())
+	for _, want := range []string{"✓", "✗ the key is wrong or missing", "✗ can't reach it: is it running?"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("model list missing %q:\n%s", want, screen)
+		}
+	}
+	// Opening it again doesn't ask again; c does.
+	m.Update(press("esc"))
+	if _, cmd := m.Update(press("b")); cmd != nil {
+		if _, isBatch := cmd().(tea.BatchMsg); isBatch {
+			t.Error("reopening the list shouldn't check again")
+		}
+	}
+	if _, cmd := m.Update(press("c")); cmd == nil || m.checking() == false {
+		t.Error("c should check again")
+	}
+}

@@ -321,7 +321,10 @@ instead. `mock` is always there (deterministic, offline, made-up answers);
   reads one from the environment instead, for files you do commit.
 - **Picking**: `--model` picks who decides and `--writer` who writes, on
   `run`, `test` and `tui`; in the TUI, `b` lists the models (`enter` decides
-  with one, `w` writes with one). A node can say `model: claude` to always
+  with one, `w` writes with one). Opening the list asks each model one small
+  yes/no question and shows which answer (`✓ 299ms`) and why the others
+  don't (`✗ the key is wrong or missing`, `✗ can't reach it: is it
+  running?`); `c` asks again. A node can say `model: claude` to always
   use one.
 - **Other options** pass through: `timeout` (seconds; 30 for decision
   models, 120 for chat, 0 for no limit), `max_tokens`, `price_in_per_mtok` /

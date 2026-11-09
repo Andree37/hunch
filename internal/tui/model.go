@@ -132,8 +132,10 @@ type Model struct {
 
 	picking     bool // the model list (b) covers the screen
 	modelCursor int
-	compare     *comparison // two recorded runs side by side
-	compareMark *trace.Run  // the first run picked with c
+	checks      map[string]*modelCheck // whether each model answered, by name
+	checksFor   string                 // the hunch.yaml they were checked against
+	compare     *comparison            // two recorded runs side by side
+	compareMark *trace.Run             // the first run picked with c
 
 	help   bool // the key list covers the screen
 	detail bool // the selected step covers the screen
@@ -389,6 +391,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(tick(), refresh, rerun)
 
+	case checkMsg:
+		m.gotCheck(msg)
+		return m, nil
+
 	case gridStartMsg, gridRowMsg, gridDoneMsg, askRowMsg, askDoneMsg:
 		return m, m.updateGrid(msg)
 
@@ -399,7 +405,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reveal++
 			m.revealAt = time.Now()
 		}
-		busy := m.gridRunning() || m.grid != nil && m.grid.asking || r != nil && (m.reveal < len(r.path) || time.Since(m.revealAt) < barFill || (!r.done && r.paused == ""))
+		busy := m.checking() || m.gridRunning() || m.grid != nil && m.grid.asking || r != nil && (m.reveal < len(r.path) || time.Since(m.revealAt) < barFill || (!r.done && r.paused == ""))
 		if !busy {
 			m.ticking = false
 			return m, nil
@@ -505,8 +511,7 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.picking {
-		m.updateModels(msg.String())
-		return m, nil
+		return m, m.updateModels(msg.String())
 	}
 	if m.detail {
 		switch msg.String() {
@@ -663,7 +668,7 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.flash = "dry run: shell and http writes are only recorded"
 		}
 	case "b":
-		m.openModels()
+		return m, m.openModels()
 	case "enter", "e":
 		switch {
 		case m.focus == focusFlow && m.flowView == viewGrid:
