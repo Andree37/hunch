@@ -2,8 +2,11 @@ package tui
 
 import (
 	"context"
+	"sync"
+
 	"errors"
 	"fmt"
+	tea "github.com/charmbracelet/bubbletea"
 	"maps"
 	"strings"
 
@@ -72,6 +75,10 @@ func (m *Model) moveThreshold(steps int) {
 	if !moves {
 		return
 	}
+	if m.grid != nil && m.grid.asking {
+		m.flash = "wait for the model to answer"
+		return
+	}
 	m.shiftSteps = next
 	switch {
 	case m.shiftSteps == 0:
@@ -100,13 +107,14 @@ func (m *Model) retune() {
 	g.rows = make([]*gridRow, len(g.model))
 	for i, r := range g.model {
 		g.prev[r.name] = r
-		g.rows[i] = m.rerouted(r)
+		g.rows[i] = rerouted(context.Background(), m.flow, r, m.shift(), nil)
 	}
 }
 
 // rerouted runs a test again with every model call answered from what the
-// model said when the grid ran.
-func (m *Model) rerouted(base *gridRow) *gridRow {
+// model said when the grid ran. With real backends, what it was never asked
+// is asked now, and kept with the rest.
+func rerouted(ctx context.Context, f *flow.Flow, base *gridRow, shift float64, real map[string]backend.Backend) *gridRow {
 	if base.kase == nil || (base.err != nil && len(base.path) == 0) {
 		return base
 	}
@@ -116,20 +124,26 @@ func (m *Model) rerouted(base *gridRow) *gridRow {
 	}
 	rb := &replayBackend{asked: base.asked, wrote: base.wrote}
 	backends := map[string]backend.Backend{}
-	for name := range m.flow.Backends {
+	for name := range f.Backends {
 		backends[name] = rb
+		if b, ok := real[name]; ok {
+			backends[name] = &askingBackend{rb, b}
+		}
 	}
 	fakes := maps.Clone(base.fetched)
 	if fakes == nil {
 		fakes = map[string]runner.FakeResponse{}
 	}
 	maps.Copy(fakes, base.kase.HTTP)
-	res, err := runner.Run(context.Background(), m.flow, maps.Clone(base.inputs), runner.Options{
-		Backends: backends, DryRun: true, Fake: fakes, ThresholdShift: m.shift(),
+	res, err := runner.Run(ctx, f, maps.Clone(base.inputs), runner.Options{
+		Backends: backends, DryRun: true, Fake: fakes, ThresholdShift: shift,
 		OnStart: func(node string) { row.path = append(row.path, node) },
-		OnEvent: func(ev runner.Event) { row.events[ev.Node] = ev },
+		OnEvent: func(ev runner.Event) {
+			row.events[ev.Node] = ev
+			row.remember(f.Node(ev.Node), ev)
+		},
 	})
-	row.final = res.State
+	row.final, row.cost = res.State, res.CostUSD
 	var na *notAskedError
 	switch {
 	case errors.As(err, &na):
@@ -139,7 +153,7 @@ func (m *Model) rerouted(base *gridRow) *gridRow {
 	case err != nil:
 		row.err = err
 	case len(base.kase.Expect) > 0:
-		row.results = base.kase.Check(m.flow, res.State)
+		row.results = base.kase.Check(f, res.State)
 	}
 	return row
 }
@@ -199,4 +213,110 @@ func (b *replayBackend) Write(_ context.Context, req backend.WriteRequest) (back
 		return backend.WriteResponse{}, &notAskedError{"to write this"}
 	}
 	return backend.WriteResponse{Text: text}, nil
+}
+
+// askingBackend answers from what the model said before and asks it the
+// rest, keeping the new answers for the next threshold tried.
+type askingBackend struct {
+	*replayBackend
+	real backend.Backend
+}
+
+func (b *askingBackend) Caps() backend.Caps { return b.real.Caps() }
+
+func (b *askingBackend) Decide(ctx context.Context, state map[string]any, qs []flow.Question) (backend.Response, error) {
+	resp, err := b.replayBackend.Decide(ctx, state, qs)
+	var na *notAskedError
+	if !errors.As(err, &na) {
+		return resp, err
+	}
+	resp, err = b.real.Decide(ctx, state, qs)
+	if err == nil {
+		for i, d := range resp.Decisions {
+			if i < len(qs) {
+				b.asked[qs[i].ID] = d
+			}
+		}
+	}
+	return resp, err
+}
+
+func (b *askingBackend) Write(ctx context.Context, req backend.WriteRequest) (backend.WriteResponse, error) {
+	if resp, err := b.replayBackend.Write(ctx, req); err == nil {
+		return resp, nil
+	}
+	w, ok := b.real.(backend.Writer)
+	if !ok {
+		return backend.WriteResponse{}, fmt.Errorf("backend %s can't write text", b.real.Name())
+	}
+	resp, err := w.Write(ctx, req)
+	if err == nil {
+		b.wrote[req.Prompt] = resp.Text
+	}
+	return resp, err
+}
+
+type (
+	askRowMsg struct {
+		id, i int
+		row   *gridRow
+	}
+	askDoneMsg struct{ id int }
+)
+
+// askMissing asks the model only what the ? tests need at the threshold
+// being tried, instead of running every test again.
+func (m *Model) askMissing() tea.Cmd {
+	g := m.grid
+	if g == nil || !g.done || g.asking {
+		return nil
+	}
+	var need []int
+	for i, r := range g.rows {
+		if r.needs != "" {
+			need = append(need, i)
+		}
+	}
+	if len(need) == 0 {
+		m.flash = "no test needs the model · ? marks those that do"
+		return nil
+	}
+	f, backends, err := m.gridFlow()
+	if err != nil {
+		m.flash = err.Error()
+		return nil
+	}
+	shift := m.shift()
+	g.asking = true
+	ch := make(chan tea.Msg, len(need)+1)
+	bases := make([]*gridRow, len(need))
+	for k, i := range need {
+		bases[k] = g.model[i]
+		g.rows[i] = &gridRow{name: g.rows[i].name, status: rowRunning, inputs: g.rows[i].inputs}
+	}
+	id := g.id
+	go func() {
+		defer close(ch)
+		sem := make(chan struct{}, gridParallel)
+		var wg sync.WaitGroup
+		for k, i := range need {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer func() { <-sem; wg.Done() }()
+				ch <- askRowMsg{id, i, rerouted(context.Background(), f, bases[k], shift, backends)}
+			}()
+		}
+		wg.Wait()
+		ch <- askDoneMsg{id}
+	}()
+	next := func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+	g.askNext = next
+	return tea.Batch(next, m.kick())
 }

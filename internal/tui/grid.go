@@ -80,6 +80,9 @@ type gridRun struct {
 	model     []*gridRow
 	ranSteps  int
 	savedPrev map[string]*gridRow
+	asking    bool    // A is asking the model what ? tests need
+	askCost   float64 // what those questions cost
+	askNext   tea.Cmd // waits for the next answer
 	started   time.Time
 	elapsed   time.Duration
 	done      bool
@@ -122,20 +125,12 @@ func (m *Model) startGrid() tea.Cmd {
 			}
 		}
 	}
-	backends := map[string]backend.Backend{}
-	for name, cfg := range m.flow.Backends {
-		b, err := backend.New(cfg)
-		if err != nil {
-			m.flash = "backend " + name + ": " + err.Error()
-			return nil
-		}
-		backends[name] = b
+	pf, backends, err := m.gridFlow()
+	if err != nil {
+		m.flash = err.Error()
+		return nil
 	}
-	f := *m.flow
-	f.DefaultBackend = m.backend
-	if m.writer != "" {
-		f.WriterBackend = m.writer
-	}
+	f := *pf
 
 	m.gridID++
 	ctx, cancel := context.WithCancel(context.Background())
@@ -210,6 +205,25 @@ func (m *Model) startGrid() tea.Cmd {
 	return tea.Batch(m.gridNext(), m.kick())
 }
 
+// gridFlow is a copy of the flow set to the backends picked in the TUI,
+// and those backends.
+func (m *Model) gridFlow() (*flow.Flow, map[string]backend.Backend, error) {
+	backends := map[string]backend.Backend{}
+	for name, cfg := range m.flow.Backends {
+		b, err := backend.New(cfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("backend %s: %w", name, err)
+		}
+		backends[name] = b
+	}
+	f := *m.flow
+	f.DefaultBackend = m.backend
+	if m.writer != "" {
+		f.WriterBackend = m.writer
+	}
+	return &f, backends, nil
+}
+
 // gridNext waits for the grid's next message.
 func (m *Model) gridNext() tea.Cmd {
 	ch := m.grid.ch
@@ -247,6 +261,20 @@ func (m *Model) updateGrid(msg tea.Msg) tea.Cmd {
 		}
 		g.done, g.elapsed = true, time.Since(g.started)
 		m.retune() // the thresholds may have moved while it ran
+		return nil
+	case askRowMsg:
+		if g == nil || msg.id != g.id {
+			return nil
+		}
+		g.rows[msg.i] = msg.row
+		g.askCost += msg.row.cost
+		return g.askNext
+	case askDoneMsg:
+		if g == nil || msg.id != g.id {
+			return nil
+		}
+		g.asking = false
+		m.retune() // with the new answers, at whatever threshold is up now
 		return nil
 	}
 	return m.gridNext()
@@ -360,7 +388,7 @@ func (m *Model) gridLines(w int) []string {
 		case r.status == rowRunning:
 			end = sYellow.Render(m.spinner() + " running")
 		case r.needs != "":
-			end = sYellow.Render("asks " + r.needs + " · R")
+			end = sYellow.Render("asks " + r.needs + " · A")
 		case r.err != nil:
 			end = sRed.Render("error")
 		case len(r.path) > 0:
@@ -436,7 +464,7 @@ func (m *Model) gridSummary() string {
 		if ask == 1 {
 			need = " needs"
 		}
-		s += sYellow.Render(fmt.Sprintf(" · %d%s the model (R)", ask, need))
+		s += sYellow.Render(fmt.Sprintf(" · %d%s the model (A asks it)", ask, need))
 	}
 	if g.done && g.prev != nil {
 		was, wasTotal := 0, 0
@@ -458,7 +486,10 @@ func (m *Model) gridSummary() string {
 		s += sYellow.Render(" · " + plural(close, "close call"))
 	}
 	if g.done && m.shiftSteps != g.ranSteps {
-		s += sYellow.Render(" · trying " + m.thresholdText(m.shiftSteps) + ", no model calls")
+		s += sYellow.Render(" · trying " + m.thresholdText(m.shiftSteps))
+		if g.askCost > 0 {
+			s += sDim.Render(fmt.Sprintf(" · asked $%.6f more", g.askCost))
+		}
 	} else if g.done {
 		cost := 0.0
 		for _, r := range g.rows {

@@ -127,7 +127,8 @@ test, one column per question, each answer with ✓ or ✗. Leave it up while yo
 edit the flow or a test in your editor: every save runs them all again and
 marks what changed (`✗→✓`, `was 9/12`). `enter` on a row opens that test's run.
 `[` and `]` try a lower or higher threshold on the answers already there, with
-no model calls, so you can see which tests it would send to `unsure`.
+no model calls, so you can see which tests it would send to `unsure`; `A`
+asks the model only for the tests that now reach a new question.
 
 ### 6. Make it do things
 

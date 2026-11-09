@@ -257,6 +257,9 @@ func (m *Model) footerBar() string {
 		keys = "s next step · r run to end · x stop · ? keys"
 	case m.flowView == viewGrid && m.grid != nil && m.focus == focusFlow:
 		keys = "j/k select · enter open its run · [ ] threshold · R run all again · m map · ? keys"
+		if slices.ContainsFunc(m.grid.rows, func(r *gridRow) bool { return r.needs != "" }) {
+			keys = "j/k select · enter open its run · [ ] threshold · A ask what ? tests need · ? keys"
+		}
 	case m.focus == focusInputs:
 		keys = "enter edit · a add · d delete · w save test · r run · ? keys"
 	case m.focus == focusTests:
@@ -298,7 +301,8 @@ func (m *Model) helpView(h int) string {
 			{"r", "run the flow; on a highlighted test or recorded run, run that"},
 			{"R", "run every test, side by side; saving the flow or a test runs them again"},
 			{"g", "back to every test's results"},
-			{"[ ]", "try a lower or higher threshold on every test's answers, with no model calls; set it in the flow to keep it"}, {"s", "run one step at a time"}, {"x", "stop"},
+			{"[ ]", "try a lower or higher threshold on every test's answers, with no model calls; set it in the flow to keep it"},
+			{"A", "ask the model only what the ? tests need at the threshold being tried"}, {"s", "run one step at a time"}, {"x", "stop"},
 			{"m", "switch between the run and the map of the flow"},
 			{"b", "switch backend"}, {"L", "live or dry run: dry runs don't run shell or send http writes"},
 		}},

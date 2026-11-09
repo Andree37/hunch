@@ -340,7 +340,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(tick(), refresh, rerun)
 
-	case gridStartMsg, gridRowMsg, gridDoneMsg:
+	case gridStartMsg, gridRowMsg, gridDoneMsg, askRowMsg, askDoneMsg:
 		return m, m.updateGrid(msg)
 
 	case animMsg:
@@ -350,7 +350,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reveal++
 			m.revealAt = time.Now()
 		}
-		busy := m.gridRunning() || r != nil && (m.reveal < len(r.path) || time.Since(m.revealAt) < barFill || (!r.done && r.paused == ""))
+		busy := m.gridRunning() || m.grid != nil && m.grid.asking || r != nil && (m.reveal < len(r.path) || time.Since(m.revealAt) < barFill || (!r.done && r.paused == ""))
 		if !busy {
 			m.ticking = false
 			return m, nil
@@ -470,6 +470,8 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "R":
 		m.focus = focusFlow
 		return m, m.startGrid()
+	case "A":
+		return m, m.askMissing()
 	case "[":
 		m.moveThreshold(-1)
 	case "]":

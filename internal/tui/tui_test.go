@@ -643,13 +643,33 @@ nodes:
 	m.Update(press("]"))
 	m.Update(press("]"))
 	screen := ansi.Strip(m.View())
-	for _, want := range []string{"trying threshold 1.00", "1 needs the model (R)", "was 1/1 at threshold 0.90", "? ann", "asks ask · R"} {
+	for _, want := range []string{"trying threshold 1.00", "1 needs the model (A asks it)", "was 1/1 at threshold 0.90", "? ann", "asks ask · A"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("at 1.00, grid missing %q:\n%s", want, screen)
 		}
 	}
 	if m.Update(press("]")); m.shiftSteps != 2 {
 		t.Errorf("] past 1.00 should stop, steps = %d", m.shiftSteps)
+	}
+
+	// A asks only what the ? test needs; the answer is kept, so going away
+	// and back needs no model call.
+	_, cmd = m.Update(press("A"))
+	for deadline := time.Now().Add(5 * time.Second); m.grid.asking && time.Now().Before(deadline); {
+		msg := cmd()
+		if b, ok := msg.(tea.BatchMsg); ok {
+			cmd = b[0]
+			continue
+		}
+		_, cmd = m.Update(msg)
+	}
+	if r := m.grid.rows[0]; r.needs != "" || !slices.Contains(r.path, "ask") || r.passed() != "pass" {
+		t.Fatalf("after A: needs=%q path=%v passed=%q", r.needs, r.path, r.passed())
+	}
+	m.Update(press("["))
+	m.Update(press("]"))
+	if r := m.grid.rows[0]; r.needs != "" || !slices.Contains(r.path, "ask") {
+		t.Errorf("the answer A got should be kept: needs=%q path=%v", r.needs, r.path)
 	}
 
 	// A step lower still passes, routed on the same answer.
