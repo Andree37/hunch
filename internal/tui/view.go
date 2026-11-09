@@ -155,6 +155,9 @@ func (m *Model) headerBar() string {
 		be += sYellow.Render(" (made-up answers)")
 	}
 	left := " " + sTitle.Render(name) + sep + m.sourceLabel() + sep + be + sep + m.modeLabel()
+	if m.shiftSteps != 0 {
+		left += sep + sYellow.Render("trying "+m.thresholdText(m.shiftSteps))
+	}
 
 	var right string
 	if r := m.run; r != nil {
@@ -253,7 +256,7 @@ func (m *Model) footerBar() string {
 	case m.pausedRun():
 		keys = "s next step · r run to end · x stop · ? keys"
 	case m.flowView == viewGrid && m.grid != nil && m.focus == focusFlow:
-		keys = "j/k select · enter open its run · R run all again · m map · ? keys"
+		keys = "j/k select · enter open its run · [ ] threshold · R run all again · m map · ? keys"
 	case m.focus == focusInputs:
 		keys = "enter edit · a add · d delete · w save test · r run · ? keys"
 	case m.focus == focusTests:
@@ -294,7 +297,8 @@ func (m *Model) helpView(h int) string {
 		{"Run", [][2]string{
 			{"r", "run the flow; on a highlighted test or recorded run, run that"},
 			{"R", "run every test, side by side; saving the flow or a test runs them again"},
-			{"g", "back to every test's results"}, {"s", "run one step at a time"}, {"x", "stop"},
+			{"g", "back to every test's results"},
+			{"[ ]", "try a lower or higher threshold on every test's answers, with no model calls; set it in the flow to keep it"}, {"s", "run one step at a time"}, {"x", "stop"},
 			{"m", "switch between the run and the map of the flow"},
 			{"b", "switch backend"}, {"L", "live or dry run: dry runs don't run shell or send http writes"},
 		}},
@@ -584,7 +588,7 @@ func (m *Model) inputQuote(w int) []string {
 // verdict is one answer with how sure the model was against the threshold,
 // fitted to w cells: "yes  ━━━━━━━┃━━──  90%".
 func (m *Model) verdict(n *flow.Node, q flow.Question, d backend.Decision, ev runner.Event, w int, frac float64) string {
-	th := m.flow.ThresholdFor(n)
+	th := m.threshold(n)
 	style := sAnswer
 	note := ""
 	switch {
@@ -713,7 +717,7 @@ func (m *Model) stepTitle() string {
 	}
 	hint := kindName(n)
 	if n.Kind.IsDecision() {
-		hint += fmt.Sprintf(" · %s · threshold %.2f", m.backendOf(n), m.flow.ThresholdFor(n))
+		hint += fmt.Sprintf(" · %s · threshold %.2f", m.backendOf(n), m.threshold(n))
 	}
 	return paneTitle(3, n.ID, hint)
 }
@@ -817,7 +821,7 @@ func (m *Model) decisionLines(n *flow.Node, ev runner.Event, ran bool, w int) []
 // why says in a sentence how sure the model was and what that did to the
 // route.
 func (m *Model) why(n *flow.Node, q flow.Question, d backend.Decision, ev runner.Event) string {
-	th := m.flow.ThresholdFor(n)
+	th := m.threshold(n)
 	label := answerLabel(q, d)
 	_, hasUnsure := n.Then.Get(flow.Unsure)
 	var s string

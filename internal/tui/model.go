@@ -124,6 +124,7 @@ type Model struct {
 	live        bool       // shell and http nodes really run; off by default
 
 	grid       *gridRun // every test run at once, shown side by side
+	shiftSteps int      // [ and ] move every threshold by this many steps
 	gridID     int
 	gridCursor int
 
@@ -469,6 +470,10 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "R":
 		m.focus = focusFlow
 		return m, m.startGrid()
+	case "[":
+		m.moveThreshold(-1)
+	case "]":
+		m.moveThreshold(1)
 	case "g":
 		if m.grid == nil {
 			m.flash = "R runs every test"
@@ -934,10 +939,11 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 		defer close(ch)
 		defer closeRec()
 		res, err := runner.Run(ctx, &f, state, runner.Options{
-			Backends: backends,
-			Stdout:   io.Discard,
-			DryRun:   !m.live,
-			Fake:     fakes,
+			Backends:       backends,
+			Stdout:         io.Discard,
+			DryRun:         !m.live,
+			Fake:           fakes,
+			ThresholdShift: m.shift(),
 			Before: func(ctx context.Context, node string) error {
 				if !stepMode.Load() {
 					return nil

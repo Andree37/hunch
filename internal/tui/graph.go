@@ -191,5 +191,5 @@ func (m *Model) rows() []row {
 
 // closeCall reports whether a decision only just cleared its threshold.
 func (m *Model) closeCall(n *flow.Node, conf float64) bool {
-	return conf < m.flow.ThresholdFor(n)+0.1
+	return conf < m.threshold(n)+0.1
 }

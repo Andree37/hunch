@@ -42,13 +42,24 @@ type gridRow struct {
 	results []cases.Result
 	err     error
 	cost    float64
+
+	// What the model said, so the run can be routed again at another
+	// threshold without asking it (see threshold.go).
+	kase    *cases.Case
+	asked   map[string]backend.Decision // by question ID
+	wrote   map[string]string           // llm text by prompt
+	fetched map[string]runner.FakeResponse
+	needs   string // rerouted to a node the model was never asked
 }
 
-// passed is "pass", "fail" or "" (ran with nothing to check).
+// passed is "pass", "fail", "ask" (needs a model call to know) or ""
+// (ran with nothing to check).
 func (r *gridRow) passed() string {
 	switch {
 	case r.status != rowDone:
 		return ""
+	case r.needs != "":
+		return "ask"
 	case r.err != nil:
 		return "fail"
 	case len(r.results) == 0:
@@ -60,14 +71,20 @@ func (r *gridRow) passed() string {
 }
 
 type gridRun struct {
-	id      int
-	rows    []*gridRow
-	prev    map[string]*gridRow // the previous grid's rows, to show what changed
-	started time.Time
-	elapsed time.Duration
-	done    bool
-	cancel  context.CancelFunc
-	ch      chan tea.Msg
+	id   int
+	rows []*gridRow
+	prev map[string]*gridRow // the previous grid's rows, to show what changed
+	// model is the rows as the model ran them, at ranSteps; rows differ
+	// from them while another threshold is tried. savedPrev is prev for
+	// those rows.
+	model     []*gridRow
+	ranSteps  int
+	savedPrev map[string]*gridRow
+	started   time.Time
+	elapsed   time.Duration
+	done      bool
+	cancel    context.CancelFunc
+	ch        chan tea.Msg
 }
 
 type (
@@ -97,10 +114,10 @@ func (m *Model) startGrid() tea.Cmd {
 		if g.cancel != nil {
 			g.cancel()
 		}
-		prev = g.prev
+		prev = g.savedPrev
 		if g.done {
 			prev = map[string]*gridRow{}
-			for _, r := range g.rows {
+			for _, r := range g.model {
 				prev[r.name] = r
 			}
 		}
@@ -122,13 +139,18 @@ func (m *Model) startGrid() tea.Cmd {
 
 	m.gridID++
 	ctx, cancel := context.WithCancel(context.Background())
-	g := &gridRun{id: m.gridID, prev: prev, started: time.Now(), cancel: cancel, ch: make(chan tea.Msg, 2*len(m.cases)+1)}
+	g := &gridRun{
+		id: m.gridID, prev: prev, savedPrev: prev, ranSteps: m.shiftSteps,
+		started: time.Now(), cancel: cancel, ch: make(chan tea.Msg, 2*len(m.cases)+1),
+	}
+	shift := m.shift()
 	all := slices.Clone(m.cases)
 	for _, c := range all {
 		state := maps.Clone(f.State)
 		maps.Copy(state, c.Input)
 		g.rows = append(g.rows, &gridRow{name: c.Name, inputs: state})
 	}
+	g.model = slices.Clone(g.rows)
 	m.grid = g
 	m.gridCursor = min(m.gridCursor, len(g.rows)-1)
 	m.flowView = viewGrid
@@ -149,13 +171,16 @@ func (m *Model) startGrid() tea.Cmd {
 			go func() {
 				defer func() { <-sem; wg.Done() }()
 				send(gridStartMsg{g.id, i})
-				row := &gridRow{name: c.Name, status: rowDone, inputs: g.rows[i].inputs, events: map[string]runner.Event{}}
+				row := &gridRow{
+					name: c.Name, status: rowDone, inputs: g.rows[i].inputs, events: map[string]runner.Event{}, kase: c,
+					asked: map[string]backend.Decision{}, wrote: map[string]string{}, fetched: map[string]runner.FakeResponse{},
+				}
 				var mu sync.Mutex
 				if err := c.CheckFakes(&f); err != nil {
 					row.err = err
 				} else {
 					res, err := runner.Run(ctx, &f, maps.Clone(row.inputs), runner.Options{
-						Backends: backends, DryRun: true, Fake: c.HTTP,
+						Backends: backends, DryRun: true, Fake: c.HTTP, ThresholdShift: shift,
 						OnStart: func(node string) {
 							mu.Lock()
 							row.path = append(row.path, node)
@@ -164,6 +189,7 @@ func (m *Model) startGrid() tea.Cmd {
 						OnEvent: func(ev runner.Event) {
 							mu.Lock()
 							row.events[ev.Node] = ev
+							row.remember(f.Node(ev.Node), ev)
 							mu.Unlock()
 						},
 					})
@@ -211,7 +237,7 @@ func (m *Model) updateGrid(msg tea.Msg) tea.Cmd {
 		if g == nil || msg.id != g.id {
 			return nil
 		}
-		g.rows[msg.i] = msg.row
+		g.rows[msg.i], g.model[msg.i] = msg.row, msg.row
 		if msg.row.results != nil {
 			m.results[msg.row.name] = msg.row.results
 		}
@@ -220,6 +246,7 @@ func (m *Model) updateGrid(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		g.done, g.elapsed = true, time.Since(g.started)
+		m.retune() // the thresholds may have moved while it ran
 		return nil
 	}
 	return m.gridNext()
@@ -332,6 +359,8 @@ func (m *Model) gridLines(w int) []string {
 			end = sDim.Render("waiting")
 		case r.status == rowRunning:
 			end = sYellow.Render(m.spinner() + " running")
+		case r.needs != "":
+			end = sYellow.Render("asks " + r.needs + " · R")
 		case r.err != nil:
 			end = sRed.Render("error")
 		case len(r.path) > 0:
@@ -371,7 +400,7 @@ func (m *Model) gridLines(w int) []string {
 // gridSummary is "✓ 11/12 passed · was 9/12 · 2 close calls · $… · 3.1s".
 func (m *Model) gridSummary() string {
 	g := m.grid
-	pass, total, done, close := 0, 0, 0, 0
+	pass, total, done, close, ask := 0, 0, 0, 0, 0
 	for _, r := range g.rows {
 		if r.status == rowDone {
 			done++
@@ -382,6 +411,8 @@ func (m *Model) gridSummary() string {
 			total++
 		case "fail":
 			total++
+		case "ask":
+			ask++
 		}
 		for _, id := range r.path {
 			if n := m.flow.Node(id); n != nil && n.Kind.IsDecision() && len(n.Questions) == 1 {
@@ -400,6 +431,13 @@ func (m *Model) gridSummary() string {
 	default:
 		s = sRed.Render(fmt.Sprintf("✗ %d/%d passed", pass, total))
 	}
+	if ask > 0 {
+		need := " need"
+		if ask == 1 {
+			need = " needs"
+		}
+		s += sYellow.Render(fmt.Sprintf(" · %d%s the model (R)", ask, need))
+	}
 	if g.done && g.prev != nil {
 		was, wasTotal := 0, 0
 		for _, r := range g.prev {
@@ -412,11 +450,16 @@ func (m *Model) gridSummary() string {
 			}
 		}
 		s += sDim.Render(fmt.Sprintf(" · was %d/%d", was, wasTotal))
+		if m.shiftSteps != g.ranSteps {
+			s += sDim.Render(" at " + m.thresholdText(g.ranSteps))
+		}
 	}
 	if close > 0 {
-		s += sYellow.Render(fmt.Sprintf(" · %d close calls", close))
+		s += sYellow.Render(" · " + plural(close, "close call"))
 	}
-	if g.done {
+	if g.done && m.shiftSteps != g.ranSteps {
+		s += sYellow.Render(" · trying " + m.thresholdText(m.shiftSteps) + ", no model calls")
+	} else if g.done {
 		cost := 0.0
 		for _, r := range g.rows {
 			cost += r.cost
@@ -444,6 +487,8 @@ func (m *Model) rowMark(r *gridRow) string {
 		return sGreen.Render("   ✓")
 	case now == "fail":
 		return sRed.Render("   ✗")
+	case now == "ask":
+		return sYellow.Render("   ?")
 	}
 	return sDim.Render("   ·")
 }
@@ -478,7 +523,7 @@ func (m *Model) gridCell(n *flow.Node, r *gridRow) string {
 	default:
 		d := ev.Decisions[0]
 		text = answerLabel(n.Questions[0], d)
-		th := m.flow.ThresholdFor(n)
+		th := m.threshold(n)
 		switch {
 		case ev.Branch == flow.Unsure:
 			style = sOrange.Bold(true)
@@ -508,4 +553,12 @@ func (m *Model) gridCell(n *flow.Node, r *gridRow) string {
 		cell += sRed.Render(" ✗")
 	}
 	return cell
+}
+
+// plural is "1 close call" or "2 close calls".
+func plural(n int, thing string) string {
+	if n == 1 {
+		return "1 " + thing
+	}
+	return fmt.Sprintf("%d %ss", n, thing)
 }

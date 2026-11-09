@@ -612,6 +612,74 @@ nodes:
 	}
 }
 
+func TestThresholdKeysRerouteWithoutTheModel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	os.WriteFile(path, []byte(`threshold: 0.9
+backends: {m: {kind: mock, answers: {a: yes}}}
+nodes:
+  a: {bool: "Reply to {{who}}?", then: {yes: b, no: c, unsure: ask}}
+  ask: {bool: "Ask a person?", then: {yes: b, no: c}}
+  b: {action: log, message: replied}
+  c: {action: log, message: archived}
+`), 0o644)
+	os.MkdirAll(filepath.Join(dir, "f.tests"), 0o755)
+	os.WriteFile(filepath.Join(dir, "f.tests", "ann.yaml"), []byte("input: {who: ann}\nexpect: {a: yes}\n"), 0o644)
+
+	m, err := New(path, nil, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
+	_, cmd := m.Update(press("R"))
+	pumpGrid(t, m, cmd)
+	if got := m.grid.rows[0].path; !slices.Equal(got, []string{"a", "b"}) {
+		t.Fatalf("path at 0.90 = %v", got)
+	}
+
+	// 0.95 confidence clears 0.90 but not 1.00: the test now goes to ask,
+	// which the model was never asked, so the grid says so instead of
+	// calling it.
+	m.Update(press("]"))
+	m.Update(press("]"))
+	screen := ansi.Strip(m.View())
+	for _, want := range []string{"trying threshold 1.00", "1 needs the model (R)", "was 1/1 at threshold 0.90", "? ann", "asks ask · R"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("at 1.00, grid missing %q:\n%s", want, screen)
+		}
+	}
+	if m.Update(press("]")); m.shiftSteps != 2 {
+		t.Errorf("] past 1.00 should stop, steps = %d", m.shiftSteps)
+	}
+
+	// A step lower still passes, routed on the same answer.
+	m.Update(press("["))
+	m.Update(press("["))
+	m.Update(press("["))
+	screen = ansi.Strip(m.View())
+	for _, want := range []string{"trying threshold 0.85", "✓ 1/1 passed", "yes ✓"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("at 0.85, grid missing %q:\n%s", want, screen)
+		}
+	}
+
+	// Back at the flow's threshold, the grid is the model's run again, and
+	// a single run routes at the tried threshold too.
+	m.Update(press("]"))
+	if m.shiftSteps != 0 || m.grid.rows[0] != m.grid.model[0] || strings.Contains(ansi.Strip(m.View()), "trying") {
+		t.Errorf("back at 0.90: steps=%d", m.shiftSteps)
+	}
+	m.Update(press("]"))
+	m.Update(press("]"))
+	m.Update(press("esc"))
+	m.useCase(0)
+	_, cmd = m.Update(press("r"))
+	drive(t, m, cmd)
+	if !slices.Contains(m.run.path, "ask") {
+		t.Errorf("a run at 1.00 should go to ask: %v", m.run.path)
+	}
+}
+
 func TestHelp(t *testing.T) {
 	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})

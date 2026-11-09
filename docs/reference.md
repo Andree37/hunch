@@ -507,9 +507,16 @@ The screen reads left to right: what goes in, what happened, and why.
   reloads. With the grid up, every save runs all the tests again and marks
   what changed: `✗→✓` or `✓→✗` on a test, `*` on an answer that changed, and
   `was 9/12` in the summary.
+- **Trying thresholds** (`[` / `]`): move every decision's threshold down or
+  up by 0.05. The grid routes each test again on the answers the model
+  already gave, so it costs nothing and is instant: `✓→✗` marks what the new
+  threshold breaks, against the grid as the model ran it. A test that now
+  reaches a question the model was never asked shows `?` until `R` asks it.
+  Runs with `r` use the tried threshold too. Nothing is saved: set
+  `threshold:` in the flow to keep it.
 
 The footer lists the keys that matter where you are; `?` lists them all.
-`r` run · `R` run every test · `g` back to all tests · `s` step one node · `x` stop · `m` run / map · `1-4` jump to pane ·
+`r` run · `R` run every test · `g` back to all tests · `[`/`]` try a lower / higher threshold · `s` step one node · `x` stop · `m` run / map · `1-4` jump to pane ·
 `tab` next pane · `j/k` move · `enter` load / open / edit · `b` switch backend ·
 `L` live / dry run · `a`/`d` add / delete input · `w` save case · `n` save as
 new case · `t` tests / recorded runs · `o` runs from elsewhere · `esc` close a

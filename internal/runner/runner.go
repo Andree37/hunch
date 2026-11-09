@@ -27,6 +27,9 @@ type Options struct {
 	// DryRun records what would have happened instead of doing it: shell
 	// commands aren't run and http writes aren't sent. GETs still are.
 	DryRun bool
+	// ThresholdShift is added to every decision's threshold, to try
+	// another threshold without editing the flow.
+	ThresholdShift float64
 	// Fake answers http nodes by name with a canned response, e.g. from a
 	// test case, instead of calling anything.
 	Fake map[string]FakeResponse
@@ -187,8 +190,13 @@ func decideNode(ctx context.Context, f *flow.Flow, n *flow.Node, state map[strin
 
 	d := resp.Decisions[0]
 	ev.Output = decisionState(d)
-	ev.Branch, ev.Next, err = route(n, d, f.ThresholdFor(n))
+	ev.Branch, ev.Next, err = route(n, d, Threshold(f, n, opts.ThresholdShift))
 	return err
+}
+
+// Threshold is the threshold n routes on, shifted, kept within 0 and 1.
+func Threshold(f *flow.Flow, n *flow.Node, shift float64) float64 {
+	return min(max(math.Round((f.ThresholdFor(n)+shift)*100)/100, 0), 1)
 }
 
 // seen picks the paths a node may see out of state, keyed by path. A path
