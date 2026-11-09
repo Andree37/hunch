@@ -405,7 +405,7 @@ and `--writer` who writes, on `run`, `test`, `tune`, `serve` and `tui`.
 
 ```sh
 hunch test examples/respond.yaml --backend jev                    # 3/3
-hunch test examples/respond.yaml --backend ollama --writer ollama # a 0.5B local model: 1/3
+hunch test examples/respond.yaml --backend ollama --writer ollama # a 1.5B local model: 1/3
 ```
 
 For decisions, `openai` backends send a JSON schema the server must follow

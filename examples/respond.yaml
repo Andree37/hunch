@@ -17,7 +17,7 @@ backends:
   mock: {kind: mock, seed: demo}
   jev: {kind: jev, provider: typesafe}
   bedrock: {kind: bedrock, model: amazon.nova-pro-v1:0, region: us-east-1}
-  ollama: {kind: openai, base_url: "http://localhost:11434/v1", model: qwen2.5:0.5b}
+  ollama: {kind: openai, base_url: "http://localhost:11434/v1", model: qwen2.5:1.5b}
 
 inputs:
   channel:
