@@ -100,6 +100,9 @@ type jevAnswer struct {
 	Score         *float64           `json:"score"`
 	Probabilities map[string]float64 `json:"probabilities"`
 	Confidence    *float64           `json:"confidence"`
+	// Laya's confidence on Jev's scale, which the thresholds are set for;
+	// its own `confidence` is stricter.
+	JevConfidence *float64 `json:"x_jev_confidence"`
 }
 
 func (j *Jev) Decide(ctx context.Context, state map[string]any, qs []flow.Question) (Response, error) {
@@ -221,7 +224,10 @@ func fromJevAnswer(q flow.Question, a jevAnswer) (Decision, error) {
 			d.Confidence = max(d.Confidence, p)
 		}
 	}
-	if a.Confidence != nil {
+	switch {
+	case a.JevConfidence != nil:
+		d.Confidence = *a.JevConfidence
+	case a.Confidence != nil:
 		d.Confidence = *a.Confidence
 	}
 	return d, nil

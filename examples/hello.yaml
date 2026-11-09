@@ -11,6 +11,7 @@ name: hello
 backends:
   default: jev
   jev: {kind: jev, provider: typesafe}  # needs TYPESAFE_API_KEY
+  laya: {kind: jev, provider: laya}       # --backend laya: Laya on this machine (laya-serve)
   mock: {kind: mock, seed: demo}        # --backend mock: offline, made-up answers
 
 nodes:

@@ -243,7 +243,7 @@ func TestLayaLocal(t *testing.T) {
 		t.Errorf("auth=%q model=%v", auth, asked["model"])
 	}
 	d := resp.Decisions
-	if d[0].Answer != "billing" || d[0].Confidence != 0.797 {
+	if d[0].Answer != "billing" || d[0].Confidence != 0.9278 { // x_jev_confidence, on Jev's scale
 		t.Errorf("choice = %+v", d[0])
 	}
 	if d[1].Answer.(float64) < 2.69 || d[1].Answer.(float64) > 2.71 || d[1].Confidence != 0.1925 {

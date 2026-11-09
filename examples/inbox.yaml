@@ -17,6 +17,9 @@ backends:
   jev:
     kind: jev
     provider: typesafe     # or openrouter, with $OPENROUTER_API_KEY
+  laya:
+    kind: jev
+    provider: laya         # --backend laya: Laya on this machine (laya-serve)
 
 inputs:
   sender:
