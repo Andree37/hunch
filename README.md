@@ -59,6 +59,13 @@ nodes:
   ask_me:  {action: log, message: "Not sure, you decide."}
 ```
 
+Or start from a sentence: `hunch new "approve refund requests"` has a model
+draft the flow and 4-6 test cases, checks them the way hunch would, sends
+the problems back until they pass, and writes `refunds.yaml` and
+`refunds.tests/`. It uses Claude when `ANTHROPIC_API_KEY` is set; `--with
+openai:MODEL`, `openrouter:MODEL` or `ollama:MODEL` picks another. Read what
+it wrote: the questions and the tests are a first draft.
+
 `hunch validate examples/hello.yaml` checks it: branches that go nowhere,
 answers with no branch, nodes nothing reaches, refs to nodes that haven't
 run yet.
@@ -194,6 +201,7 @@ traffic turns into tests.
 
 | Command | Does |
 |---|---|
+| `hunch new "..."` | draft a flow and its tests from a sentence |
 | `hunch validate FLOW` | check a flow without running it |
 | `hunch run FLOW` | run it once |
 | `hunch test FLOW` | run its test cases |
