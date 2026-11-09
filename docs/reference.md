@@ -530,7 +530,6 @@ recorded run · `F` flow picker · `q` quit
 - `hunch validate FLOW`: dangling routes, impossible branches, uncovered
   answers, unreachable nodes, loops, refs to nodes that haven't run yet.
 - `hunch tui [FLOW] [--backend name] [--writer name] [--set k=v]... [--state f.json] [--runs place]`: without FLOW, pick one
-- `hunch new "what it decides" [-o FLOW] [--with anthropic[:MODEL]|openai:MODEL|openrouter:MODEL|ollama:MODEL]`: a model drafts a flow and 4-6 test cases; hunch validates them and asks for fixes (up to 3 drafts), then writes the flow with backends for the keys you have (Jev if `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set, else mock) and its tests. Never overwrites.
 - `hunch test FLOW [--backend name] [--live] [case...]`: run test cases, check expectations. `shell` and `http` write nodes only record unless `--live`.
 - `hunch tune FLOW [--runs file.jsonl] [--backend name] [--no-tests] [--all]`: see what each threshold would do.
 - `hunch serve FLOW [--addr host:port] [--backend name] [--writer name] [--dry-run] [--token-env VAR] [--trace file|dir|s3://...] [--dedupe-key T] [--dedupe-store dir|s3://...]`: run the flow for each webhook POST.

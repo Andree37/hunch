@@ -26,7 +26,6 @@ import (
 const usage = `hunch: decision flows with typed, calibrated answers
 
 usage:
-  hunch new "what it should decide" [-o FLOW] [--with anthropic|openai:MODEL|openrouter:MODEL|ollama:MODEL]
   hunch validate FLOW
   hunch tui [FLOW] [--backend name] [--writer name] [--set key=value]... [--state file.json] [--runs file.jsonl]
   hunch run FLOW [--backend name] [--writer name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl|dir|s3://b/p] [--json] [--dry-run]
@@ -70,8 +69,6 @@ func main() {
 		err = cmdServe(ctx, os.Args[2:])
 	case "tune":
 		err = cmdTune(ctx, os.Args[2:])
-	case "new":
-		err = cmdNew(ctx, os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return
