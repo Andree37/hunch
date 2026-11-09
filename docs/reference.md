@@ -10,7 +10,7 @@ so later nodes build on earlier ones via `{{node.field}}` refs.
 Backends are swappable: Jev, local models, or the built-in deterministic mock.
 
 ```sh
-go run ./cmd/hunch validate examples/inbox.yaml
+go run ./cmd/hunch tui examples/inbox.yaml
 go run ./cmd/hunch run examples/inbox.yaml --set sender=boss --set message="Can we sync Thursday?"
 ```
 
@@ -215,57 +215,13 @@ renders empty when missing.
 Score answers are expected values, so a run can land between levels; the
 validator warns about gaps.
 
-## Serving
-
-`hunch serve FLOW` runs the flow for every `POST /`: the JSON body is the
-input, the reply is the path taken and the outputs. Point any webhook at it
-(a form submitted, a record created, a message received).
-
-```sh
-hunch serve examples/respond.yaml --backend jev --token-env HOOK_TOKEN
-curl -H "Authorization: Bearer $HOOK_TOKEN" \
-  -d '{"channel": "chat", "message": "How do I reset my password?", "post_url": "https://..."}' \
-  http://127.0.0.1:8080/
-# {"path": ["needs_reply", "kind", "draft", ...], "outputs": {"action": "sent", ...}, "cost_usd": 0.00004}
-```
-
-- Listens on `127.0.0.1:8080` unless `--addr` says otherwise.
-- `--token-env VAR` requires `Authorization: Bearer <$VAR>`.
-- Inputs are checked like everywhere else; bad or missing ones get a 400.
-- Live by default; `--dry-run` records shell commands and http writes instead of doing them.
-- A failed run returns 500 with the error and `failed_at` node.
-- `--trace` records every run (see [Recording and replaying runs](#recording-and-replaying-runs));
-  `GET /healthz` for checks.
-- **Duplicates**: webhook senders retry. With `--dedupe-key '{{record.id}}'`,
-  or when the sender sends an `Idempotency-Key` header, a repeat of a
-  finished run gets that run's reply (marked `"duplicate": true`) without
-  running again, and a repeat of one still running gets 409. Failed runs
-  aren't remembered, so a retry runs them again. Remembered for
-  `--dedupe-ttl` (24h), in memory unless you give `--dedupe-store`:
-  - `--dedupe-store ./dedupe/` or `--dedupe-store s3://bucket/dedupe/` keeps
-    one object per key, so the memory survives restarts and is **shared by
-    every serve using the same store**: several tasks behind a load balancer
-    run each delivery exactly once. Claims are atomic (create-if-absent on
-    disk, S3 conditional writes).
-  - A claim left "running" by a serve that died is taken over after
-    `--timeout` + 1 minute.
-  - If the store can't be reached, the webhook gets 503 so the sender retries,
-    rather than risk running it twice. Set an S3 lifecycle rule on the prefix
-    to clean up old entries.
-- **Load**: at most `--max-concurrent` (4) runs at once; others wait up to 30s,
-  then get 503 with `Retry-After`.
-- **Runs finish** even if the sender hangs up, bounded by `--timeout` (5m), so
-  a run never stops between two writes.
-- **Edits** to the flow file are picked up on the next request; a broken edit
-  is logged and the last good flow keeps serving.
-
 ## Recording and replaying runs
 
-`hunch run`, `hunch serve` and the TUI record every run: its input, each step
+`hunch run` and the TUI record every run: its input, each step
 (question as asked, what the model saw, probabilities, route, cost), and how
 it ended. By default runs go next to the flow, like its tests:
 `examples/triage.yaml` → `examples/triage.runs/`. Set `runs:` in the flow to
-record elsewhere (a path relative to the flow file, or `s3://bucket/prefix`),
+record elsewhere (a path, relative to the flow file),
 `runs: off` to not record, or `--trace` to override it for one command.
 A location can be:
 
@@ -273,22 +229,20 @@ A location can be:
 |---|---|
 | `runs.jsonl` | one file, appended to, rolling over at `--trace-max-mb` (100) and keeping 3 old files |
 | `./runs/` | one file per run, named by start time: `2026-09-27/18-17-19.123-<id>.jsonl` |
-| `s3://bucket/runs/` | the same, as S3 objects (credentials and region from the usual AWS chain; `?region=` overrides) |
 
-One object per run means several serve tasks never write over each other.
 The TUI reads the flow's runs by itself:
 
 ```sh
-hunch serve examples/triage.yaml     # records to examples/triage.runs/
-hunch tui examples/triage.yaml       # lists and replays them
+hunch run examples/hello.yaml --set message="Can we sync Thursday?"   # records to examples/hello.runs/
+hunch tui examples/hello.yaml                                         # lists and replays them
 ```
 
 - Pane 2 lists the flow's recorded runs, newest first (`t` switches to test
   cases). Only runs of the open flow are listed; runs of other flows in the
   same place are hidden, with the command to open them. `o` reads runs from
-  somewhere else (a folder, a `.jsonl` file or `s3://…`), as does `--runs`;
-  it updates while serve keeps recording (a file on change; a directory or
-  S3 every 10s, in the background).
+  somewhere else (a folder or a `.jsonl` file), as does `--runs`; it
+  updates while runs keep being recorded (a file on change, a directory
+  every 10s, in the background).
 - Enter loads a run into the Run and Map views, with its input in the Input pane.
 - `esc` (or Enter on it again) closes it and puts back what you had before.
 - `s` replays it one step at a time, exactly as it happened; `r` runs the same
@@ -300,30 +254,10 @@ hunch tui examples/triage.yaml       # lists and replays them
   same after any finished run in the TUI; with no run of the current inputs on
   screen it saves just the inputs.
 
-## Tuning thresholds
+## The triage example
 
-`hunch tune FLOW` shows, for each node that routes on confidence, what every
-threshold would do with the answers already collected: how many go through
-automatically, how many go to `unsure`, and how many would be confident but
-wrong.
-
-```sh
-hunch tune examples/triage.yaml --runs runs.jsonl
-```
-
-- Recorded runs (`--runs`) are real traffic but don't say what's right; test
-  cases are run once and do. `--no-tests` uses recordings only.
-- It suggests the lowest threshold with no confident wrong answer among the
-  known ones, and warns when there are fewer than 10 of those to go on.
-- Each node is judged on the runs that reached it; a changed threshold
-  upstream changes which runs reach it.
-
-## Try it for real, locally
-
-`examples/ticketdesk` is a toy ticket system: tickets live in team queues, it
-sends a webhook when one is created, and accepts rerouting, severity changes
-and comments. The demo wires it to `hunch serve` running
-`examples/triage.yaml`, triage for a network team:
+`examples/triage.yaml` is triage for a network team. Given a ticket id, it
+fetches the ticket from `TICKETS_API` and:
 
 1. **Whose ticket is it?** Jev picks the team from what each team handles
    (network, desktop, identity, applications). "My computer is down" is ours
@@ -337,34 +271,10 @@ and comments. The demo wires it to `hunch serve` running
    the decision and those facts; Jev checks it, and a plain note built from
    the facts is posted if it's off.
 
-```sh
-ollama pull qwen2.5:1.5b && ollama serve   # the note model
-examples/ticketdesk/demo.sh                # needs TYPESAFE_API_KEY in .env
-```
-
-It creates six tickets and prints what happened to each:
-
-```
-#1 [sev3 · network] My computer is down             (no internet, hotspot works)
-    created as sev2 in network · severity sev2 → sev3 · comment added
-#2 [sev2 · desktop] My computer is down             (won't power on)
-    created as sev2 in network · routed network → desktop · comment added
-#3 [sev2 · network] No Wi-Fi on the 3rd floor
-#4 [sev2.5 · network] VPN keeps dropping
-    created as sev2 in network · severity sev2 → sev2.5 · comment added
-#5 [sev2 · identity] Cannot log in, password expired
-    created as sev2 in network · routed network → identity · comment added
-#6 [sev1 · network] Whole Lisbon office has no internet   (sev1: left to people)
-```
-
-Replay any of them step by step: `go run ./cmd/hunch tui`, pick
-`network-triage`, then `2` for its runs (recorded in `examples/triage.runs/`).
-
 The 12 test cases in `examples/triage.tests/` cover ownership and severity,
 including both readings of "my computer is down":
 `go run ./cmd/hunch test examples/triage.yaml` (12/12 with Jev deciding).
-The demo runs the real system and writes to tickets; the tests fake the
-ticket fetch, never write, and say pass or fail per ticket.
+They fake the ticket fetch and never write.
 
 ## Examples
 
@@ -374,7 +284,7 @@ Each is a different shape of the same building blocks; none is special.
 |---|---|
 | `examples/inbox.yaml` | Chained decisions: gate, classify, multi-question, score, route on confidence. |
 | `examples/respond.yaml` | Decide, write with a model, judge the result, then send it or hand it to a person. |
-| `examples/triage.yaml` | Webhook-driven triage: a model decides ownership and reroutes, a rule limits scope, a model re-classifies (only downwards), a second model writes a note that the first one checks, the source record is updated. |
+| `examples/triage.yaml` | Ticket triage: a model decides ownership and reroutes, a rule limits scope, a model re-classifies (only downwards), a second model writes a note that the first one checks, the source record is updated. |
 
 Each has a `<flow>.tests/` folder you can run with `hunch test`.
 
@@ -403,7 +313,7 @@ route, and the TUI marks those numbers `self-reported`; check such
 thresholds against your test cases.
 
 Swap models per run without editing the flow: `--backend` picks who decides
-and `--writer` who writes, on `run`, `test`, `tune`, `serve` and `tui`.
+and `--writer` who writes, on `run`, `test` and `tui`.
 
 ```sh
 hunch test examples/respond.yaml --backend jev                    # 3/3
@@ -527,10 +437,10 @@ recorded run · `F` flow picker · `q` quit
 
 ## Commands
 
-- `hunch validate FLOW`: dangling routes, impossible branches, uncovered
-  answers, unreachable nodes, loops, refs to nodes that haven't run yet.
+Every command checks the flow when it loads it (dangling routes, impossible
+branches, uncovered answers, unreachable nodes, loops, refs to nodes that
+haven't run yet) and stops on errors.
+
 - `hunch tui [FLOW] [--backend name] [--writer name] [--set k=v]... [--state f.json] [--runs place]`: without FLOW, pick one
 - `hunch test FLOW [--backend name] [--live] [case...]`: run test cases, check expectations. `shell` and `http` write nodes only record unless `--live`.
-- `hunch tune FLOW [--runs file.jsonl] [--backend name] [--no-tests] [--all]`: see what each threshold would do.
-- `hunch serve FLOW [--addr host:port] [--backend name] [--writer name] [--dry-run] [--token-env VAR] [--trace file|dir|s3://...] [--dedupe-key T] [--dedupe-store dir|s3://...]`: run the flow for each webhook POST.
 - `hunch run FLOW [--backend name] [--case name] [--set k=v]... [--state f.json] [--trace f.jsonl] [--json] [--max-visits N]`

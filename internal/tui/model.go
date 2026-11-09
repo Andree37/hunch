@@ -111,7 +111,7 @@ type Model struct {
 
 	flowView flowView
 
-	runsPath    string // recorded runs: a file, a directory or s3://bucket/prefix
+	runsPath    string // recorded runs: a .jsonl file or a directory
 	runsMod     time.Time
 	runsLoading bool
 	runs        []*trace.Run   // of this flow, newest first
@@ -988,7 +988,7 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 // recorder opens where this flow's runs are kept. With nowhere to record
 // (runs: off) it returns a nil writer, which records nothing.
 func (m *Model) recorder(ctx context.Context) (*trace.Writer, func()) {
-	// Mock answers are made up; they'd only mislead hunch tune.
+	// Mock answers are made up; they'd only mislead anyone reading the runs.
 	loc := m.flow.RunsLocation()
 	if loc == "" || !m.record || m.mock() {
 		return nil, func() {}

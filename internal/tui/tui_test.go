@@ -800,7 +800,7 @@ func TestSwitchNode(t *testing.T) {
 	}
 }
 
-// recordRuns runs the test flow for each input and records it like serve does.
+// recordRuns runs the test flow for each input and records it like hunch run does.
 func recordRuns(t *testing.T, inputs ...map[string]any) string {
 	t.Helper()
 	return recordRunsFor(t, "testdata/inbox.yaml", inputs...)

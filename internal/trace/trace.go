@@ -1,5 +1,5 @@
 // Package trace records runs as JSON lines and reads them back, so a run
-// that happened elsewhere (e.g. under hunch serve) can be replayed in the TUI.
+// that happened elsewhere (e.g. with hunch run) can be replayed in the TUI.
 //
 // Each run is a "start" line (id, time, flow, input), one "step" line per
 // node, and an "end" line (path, outputs, cost, error).
@@ -50,8 +50,8 @@ type end struct {
 }
 
 // Writer records runs; safe for concurrent runs. It either streams lines
-// to one file, or (on a store) keeps each run's lines until it ends and
-// writes them as one object, since S3 objects can't be appended to.
+// to one file, or (in a directory) keeps each run's lines until it ends and
+// writes them as one file per run.
 type Writer struct {
 	mu      sync.Mutex
 	w       io.Writer
@@ -73,10 +73,9 @@ func NewStoreWriter(st store.Store) *Writer {
 }
 
 // Open records to loc: a path ending in .jsonl is one file, appended to and
-// rolled over at maxBytes (keeping 3); a directory or s3://bucket/prefix
-// gets one object per run.
+// rolled over at maxBytes (keeping 3); a directory gets one file per run.
 func Open(ctx context.Context, loc string, maxBytes int64) (*Writer, io.Closer, error) {
-	if strings.HasSuffix(loc, ".jsonl") && !store.IsRemote(loc) {
+	if strings.HasSuffix(loc, ".jsonl") {
 		f, err := OpenRotating(loc, maxBytes, 3)
 		if err != nil {
 			return nil, nil, err
@@ -283,17 +282,12 @@ func (r *RotatingFile) Close() error {
 }
 
 // ReadAll reads recorded runs from loc, oldest first: a .jsonl file (with
-// its rolled-over files), a directory or s3://bucket/prefix of per-run
-// objects.
+// its rolled-over files) or a directory of per-run files.
 func ReadAll(ctx context.Context, loc string) ([]*Run, error) {
-	if !store.IsRemote(loc) {
-		st, err := os.Stat(loc)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil // nothing recorded yet
-		}
-		if err == nil && !st.IsDir() {
-			return ReadFiles(loc)
-		}
+	if st, err := os.Stat(loc); errors.Is(err, os.ErrNotExist) {
+		return nil, nil // nothing recorded yet
+	} else if err == nil && !st.IsDir() {
+		return ReadFiles(loc)
 	}
 	st, err := store.Open(ctx, loc)
 	if err != nil {

@@ -59,9 +59,9 @@ nodes:
   ask_me:  {action: log, message: "Not sure, you decide."}
 ```
 
-`hunch validate examples/hello.yaml` checks it: branches that go nowhere,
-answers with no branch, nodes nothing reaches, refs to nodes that haven't
-run yet.
+Every command checks a flow before running it and stops on mistakes:
+branches that go nowhere, answers with no branch, nodes nothing reaches,
+refs to nodes that haven't run yet. The TUI shows them at the top.
 
 ### 2. Run it
 
@@ -164,21 +164,12 @@ hold: {action: output, set: {action: needs_human, reply: "{{draft.text}}"}}
 PUT, PATCH, DELETE); they show what would have been done. `--live` (or `L` in
 the TUI) does it for real. `hunch run` does it unless given `--dry-run`.
 
-### 7. Run it on real events
+### 7. Turn real runs into tests
 
-```sh
-hunch serve examples/hello.yaml --token-env HOOK_TOKEN
-curl -H "Authorization: Bearer $HOOK_TOKEN" -d '{"message": "Can we sync Thursday?"}' http://127.0.0.1:8080/
-```
-
-Each `POST /` runs the flow with the JSON body as input and replies with the
-path and outputs. Point a webhook at it.
-
-Every run (from `serve`, `run` or the TUI) is recorded next to the flow, in
+Every run (from `hunch run` or the TUI) is recorded next to the flow, in
 `hello.runs/`. Open the flow in the TUI and press `2` to see them (`t`
 switches between runs and tests), `enter` to replay one, and `n` to save it
-as a test case. That's how real
-traffic turns into tests.
+as a test case. That's how real inputs turn into tests.
 
 ## Node types
 
@@ -194,12 +185,9 @@ traffic turns into tests.
 
 | Command | Does |
 |---|---|
-| `hunch validate FLOW` | check a flow without running it |
-| `hunch run FLOW` | run it once |
+| `hunch tui [FLOW]` | build and explore it: run tests, see why, try thresholds |
 | `hunch test FLOW` | run its test cases |
-| `hunch tui [FLOW]` | run and inspect it interactively |
-| `hunch serve FLOW` | run it for each webhook |
-| `hunch tune FLOW` | see what each threshold would do with the answers so far |
+| `hunch run FLOW` | run it once, on real input |
 
 ## Examples
 
@@ -208,12 +196,12 @@ traffic turns into tests.
 | [`hello.yaml`](examples/hello.yaml) | The flow above. |
 | [`inbox.yaml`](examples/inbox.yaml) | Triage a message, with scores and several questions at once. |
 | [`respond.yaml`](examples/respond.yaml) | Draft a reply, check it, then send it or hand it to a person. |
-| [`triage.yaml`](examples/triage.yaml) | Route and re-grade support tickets from a webhook ([demo](examples/ticketdesk)). |
+| [`triage.yaml`](examples/triage.yaml) | Route and re-grade support tickets fetched from a ticket API. |
 
 ## More
 
 Everything else (inputs and their types, what a model sees, refs, retries,
-dedupe, recording to S3, tuning thresholds) is in
+where runs are recorded) is in
 **[docs/reference.md](docs/reference.md)**.
 
 The screenshot is taken with [VHS](https://github.com/charmbracelet/vhs):

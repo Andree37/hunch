@@ -3,13 +3,11 @@
 # against our SLA and lower it if it's filed too high, saying why on the
 # ticket. It never raises a severity, and only sev2 and sev2.5 are checked.
 #
-# Triggered by a webhook when a ticket is created; the webhook only sends the
-# id, and the flow fetches the ticket itself:
+# Given a ticket id, the flow fetches the ticket itself from TICKETS_API:
 #
-#   export TICKETS_API=http://127.0.0.1:8090 TICKETS_TOKEN=... HOOK_TOKEN=...
-#   hunch serve examples/triage.yaml --token-env HOOK_TOKEN --dedupe-key '{{ticket_id}}'
+#   export TICKETS_API=https://tickets.example.com TICKETS_TOKEN=...
+#   hunch run examples/triage.yaml --set ticket_id=101
 #
-# Try it end to end with the toy ticket system: examples/ticketdesk/demo.sh
 # The test cases fake the fetch and never write: hunch test examples/triage.yaml
 name: network-triage
 
@@ -49,7 +47,7 @@ state:
     sev3: One user's problem that has a workaround, a question, or a request for access or setup.
 
 inputs:
-  ticket_id: {type: number, description: The id the webhook sends}
+  ticket_id: {type: number, description: The ticket to triage}
 
 nodes:
   fetch:

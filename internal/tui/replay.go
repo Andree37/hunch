@@ -17,7 +17,7 @@ import (
 	"github.com/Andree37/hunch/internal/trace"
 )
 
-// Recorded runs (from `hunch serve --trace` or `hunch run --trace`) can be
+// Recorded runs (from `hunch run` or the TUI) can be
 // opened with --runs, listed in pane 2, loaded into the views and replayed
 // one step at a time.
 
@@ -49,7 +49,7 @@ func (m *Model) useFlowRuns() {
 // openRunsPrompt asks for another place to read runs from.
 func (m *Model) openRunsPrompt() tea.Cmd {
 	m.editing = editRunsPath
-	m.keyEditor.Prompt = "runs from (folder, .jsonl or s3://…): "
+	m.keyEditor.Prompt = "runs from (folder or .jsonl): "
 	m.keyEditor.SetValue(m.runsPath)
 	m.keyEditor.CursorEnd()
 	return m.keyEditor.Focus()
@@ -105,7 +105,7 @@ func (m *Model) setRuns(runs []*trace.Run) {
 }
 
 // runsFile reports whether the runs come from a single .jsonl file (cheap
-// to check every tick) rather than a directory or S3.
+// to check every tick) rather than a directory.
 func (m *Model) runsFile() bool {
 	st, err := os.Stat(m.runsPath)
 	return err == nil && !st.IsDir()
@@ -117,7 +117,7 @@ func (m *Model) runsStamp() time.Time {
 			return st.ModTime()
 		}
 	}
-	return time.Now() // for directories and S3: when they were last listed
+	return time.Now() // for directories: when they were last listed
 }
 
 type runsLoadedMsg struct {
@@ -126,7 +126,7 @@ type runsLoadedMsg struct {
 }
 
 // refreshRuns picks up newly recorded runs: a file when it changes, a
-// directory or S3 every 10s, listed in the background so the UI never waits.
+// directory every 10s, listed in the background so the UI never waits.
 func (m *Model) refreshRuns() tea.Cmd {
 	if m.runsPath == "" || m.runsLoading {
 		return nil

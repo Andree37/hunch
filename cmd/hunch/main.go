@@ -26,19 +26,14 @@ import (
 const usage = `hunch: decision flows with typed, calibrated answers
 
 usage:
-  hunch validate FLOW
   hunch tui [FLOW] [--backend name] [--writer name] [--set key=value]... [--state file.json] [--runs file.jsonl]
-  hunch run FLOW [--backend name] [--writer name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl|dir|s3://b/p] [--json] [--dry-run]
   hunch test FLOW [--backend name] [--writer name] [--live] [name...]
-  hunch tune FLOW [--runs file.jsonl] [--backend name] [--writer name] [--no-tests] [--all]
-  hunch serve FLOW [--addr 127.0.0.1:8080] [--backend name] [--writer name] [--dry-run] [--token-env VAR] [--trace file.jsonl|dir|s3://b/p]
-             [--dedupe-key '{{record.id}}'] [--dedupe-store dir|s3://b/p] [--max-concurrent 4]
-             [--timeout 5m] [--trace-max-mb 100]
+  hunch run FLOW [--backend name] [--writer name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl|dir] [--json] [--dry-run]
 
-shell nodes and http nodes that write run for real in run and serve (unless
---dry-run) and are only recorded in test and the TUI (unless --live / L).
-serve runs FLOW for every POST /: the JSON body is the input, the reply the
-path taken and the outputs.
+Every command checks the flow first and stops on errors.
+
+shell nodes and http nodes that write run for real in run (unless --dry-run)
+and are only recorded in test and the TUI (unless --live / L).
 
 Test cases live in FLOW's sibling directory, e.g. inbox.yaml → inbox.tests/*.yaml.
 `
@@ -57,18 +52,12 @@ func main() {
 
 	var err error
 	switch os.Args[1] {
-	case "validate":
-		err = cmdValidate(os.Args[2:])
 	case "run":
 		err = cmdRun(ctx, os.Args[2:])
 	case "tui":
 		err = cmdTUI(os.Args[2:])
 	case "test":
 		err = cmdTest(ctx, os.Args[2:])
-	case "serve":
-		err = cmdServe(ctx, os.Args[2:])
-	case "tune":
-		err = cmdTune(ctx, os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return
@@ -81,26 +70,12 @@ func main() {
 	}
 }
 
-func cmdValidate(args []string) error {
-	fs := flag.NewFlagSet("validate", flag.ExitOnError)
-	path, err := parseArgs(fs, args)
-	if err != nil {
-		return err
-	}
-	f, err := loadChecked(path, os.Stdout)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("✓ %s: %d nodes, starts at %q\n", path, len(f.Nodes), f.Start)
-	return nil
-}
-
 func cmdRun(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	var sets multiFlag
 	fs.Var(&sets, "set", "set a state field, key=value (repeatable; values parse as JSON when they can)")
 	stateFile := fs.String("state", "", "JSON file with initial state")
-	traceFile := fs.String("trace", "", "where to record the run: a .jsonl file, a directory, s3://bucket/prefix, or off (default: the flow's runs location)")
+	traceFile := fs.String("trace", "", "where to record the run: a .jsonl file, a directory, or off (default: the flow's runs location)")
 	asJSON := fs.Bool("json", false, "print final state as JSON on stdout; progress goes to stderr")
 	maxVisits := fs.Int("max-visits", 5, "max times a single node may run")
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
@@ -201,7 +176,7 @@ func cmdTUI(args []string) error {
 	stateFile := fs.String("state", "", "JSON file with initial state")
 	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
 	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
-	runsFile := fs.String("runs", "", "read recorded runs from here instead of the flow's runs location: a .jsonl file, a directory or s3://bucket/prefix")
+	runsFile := fs.String("runs", "", "read recorded runs from here instead of the flow's runs location: a .jsonl file or a directory")
 	paths, err := parseOptionalArg(fs, args)
 	if err != nil {
 		return err
