@@ -11,7 +11,7 @@ Set WindowBar Colorful
 
 Hide
 Type "export PS1='$ ' && clear" Enter
-Type "hunch tui examples/hello.yaml --backend jev" Enter
+Type "hunch tui examples/hello.yaml --model jev" Enter
 Sleep 2s
 Type "2"
 Sleep 300ms

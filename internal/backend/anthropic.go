@@ -3,7 +3,6 @@ package backend
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -16,7 +15,7 @@ import (
 // anthropicChat calls a model through the Anthropic API. Options:
 //
 //	model:       required, the model ID
-//	api_key_env: default ANTHROPIC_API_KEY
+//	api_key:     the API key
 //	base_url:    override the API endpoint, e.g. for a proxy
 //	timeout:     seconds per call, retries included (default 120; 0 = no limit)
 //
@@ -26,7 +25,6 @@ import (
 type anthropicChat struct {
 	client  anthropic.Client
 	model   string
-	keyEnv  string
 	hasKey  bool
 	timeout time.Duration
 	opts    map[string]any
@@ -38,8 +36,7 @@ func newAnthropic(cfg flow.BackendConfig) (*chatBackend, error) {
 	if model == "" {
 		return nil, fmt.Errorf("backend %q: model is required (the model ID)", cfg.Name)
 	}
-	keyEnv := optString(o, "api_key_env", "ANTHROPIC_API_KEY")
-	key := os.Getenv(keyEnv)
+	key := optString(o, "api_key", "")
 	opts := []option.RequestOption{option.WithoutEnvironmentDefaults()}
 	if key != "" {
 		opts = append(opts, option.WithAPIKey(key))
@@ -50,8 +47,7 @@ func newAnthropic(cfg flow.BackendConfig) (*chatBackend, error) {
 	m := &anthropicChat{
 		client:  anthropic.NewClient(opts...),
 		model:   model,
-		keyEnv:  keyEnv,
-		hasKey:  key != "" || optString(o, "base_url", "") != "",
+		hasKey:  key != "",
 		timeout: optSeconds(o, "timeout", 120),
 		opts:    o,
 	}
@@ -60,7 +56,7 @@ func newAnthropic(cfg flow.BackendConfig) (*chatBackend, error) {
 
 func (m *anthropicChat) chat(ctx context.Context, r chatRequest) (string, float64, error) {
 	if !m.hasKey {
-		return "", 0, fmt.Errorf("%s is not set", m.keyEnv)
+		return "", 0, fmt.Errorf("no key: add key: to this model in hunch.yaml")
 	}
 	if m.timeout > 0 { // 0 means no limit
 		var cancel context.CancelFunc

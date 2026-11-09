@@ -1,0 +1,5 @@
+# Models for the TUI tests.
+default: mock
+models:
+  mock: {seed: demo}
+  jev: https://api.typesafe.ai/v1/systemone

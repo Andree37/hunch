@@ -106,7 +106,7 @@ type KV struct {
 var actionFields = map[string]map[string]bool{
 	ActLog:    set("message"),
 	ActShell:  set("run", "timeout"),
-	ActLLM:    set("prompt", "system", "max_tokens", "backend"),
+	ActLLM:    set("prompt", "system", "max_tokens", "model"),
 	ActHTTP:   set("method", "url", "headers", "body", "timeout", "retries", "idempotency_key"),
 	ActOutput: set("set"),
 }
@@ -254,6 +254,8 @@ type Flow struct {
 	InputSpecs     []InputSpec // declared inputs, in file order
 	Nodes          []*Node     // in file order
 
+	Project *Project // the hunch.yaml its models come from; nil when there's none
+
 	Root  *yaml.Node // document root, kept for round-trip editing
 	index map[string]*Node
 }
@@ -307,6 +309,13 @@ func Load(path string) (*Flow, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	f.Path = path
+	p, err := FindProject(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	if p != nil {
+		f.UseProject(p)
+	}
 	return f, nil
 }
 
@@ -355,9 +364,7 @@ func Parse(data []byte) (*Flow, error) {
 				return nil, err
 			}
 		case "backends":
-			if err := parseBackends(f, v); err != nil {
-				return nil, err
-			}
+			return nil, errAt(v, "backends: models now live in %s next to your flows; move them there (see docs/reference.md)", ProjectFile)
 		case "nodes":
 			if err := parseNodes(f, v); err != nil {
 				return nil, err
@@ -373,44 +380,9 @@ func Parse(data []byte) (*Flow, error) {
 	if f.Start == "" && len(f.Nodes) > 0 {
 		f.Start = f.Nodes[0].ID
 	}
-	if len(f.Backends) == 0 {
-		f.Backends["mock"] = BackendConfig{Name: "mock", Kind: "mock"}
-	}
-	if f.DefaultBackend == "" && len(f.Backends) == 1 {
-		for name := range f.Backends {
-			f.DefaultBackend = name
-		}
-	}
+	f.UseProject(nil)
+	f.Project = nil
 	return f, nil
-}
-
-func parseBackends(f *Flow, n *yaml.Node) error {
-	fields, keys, err := mapping(n)
-	if err != nil {
-		return err
-	}
-	for _, name := range keys {
-		v := fields[name]
-		switch name {
-		case "default":
-			f.DefaultBackend = v.Value
-			continue
-		case "writer":
-			f.WriterBackend = v.Value
-			continue
-		}
-		var opts map[string]any
-		if err := v.Decode(&opts); err != nil {
-			return errAt(v, "backend %q: %v", name, err)
-		}
-		kind, _ := opts["kind"].(string)
-		if kind == "" {
-			return errAt(v, "backend %q: missing kind", name)
-		}
-		delete(opts, "kind")
-		f.Backends[name] = BackendConfig{Name: name, Kind: kind, Options: opts}
-	}
-	return nil
 }
 
 func parseNodes(f *Flow, n *yaml.Node) error {
@@ -435,7 +407,7 @@ func parseNodes(f *Flow, n *yaml.Node) error {
 var (
 	questionKeys = set("bool", "choice", "score", "options", "scale", "levels", "criteria")
 	nodeKeys     = set(append([]string{"bool", "choice", "score", "questions", "action", "switch",
-		"options", "scale", "levels", "criteria", "backend", "threshold", "then", "sees"}, actionOnly...)...)
+		"options", "scale", "levels", "criteria", "model", "threshold", "then", "sees"}, actionOnly...)...)
 )
 
 func parseNode(id string, n *yaml.Node) (*Node, error) {
@@ -526,7 +498,7 @@ func parseNode(id string, n *yaml.Node) (*Node, error) {
 			node.Sees = []string{} // `sees: []`: the question alone
 		}
 	}
-	if b := fields["backend"]; b != nil {
+	if b := fields["model"]; b != nil {
 		node.Backend = b.Value
 	}
 	if t := fields["threshold"]; t != nil {

@@ -48,7 +48,7 @@ func TestChatDecide(t *testing.T) {
 	defer srv.Close()
 
 	b, err := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{
-		"model": "some-model", "base_url": srv.URL + "/v1", "price_in_per_mtok": 1.0, "price_out_per_mtok": 10.0,
+		"model": "some-model", "endpoint": srv.URL + "/v1/chat/completions", "price_in_per_mtok": 1.0, "price_out_per_mtok": 10.0,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestChatDecideBadReplies(t *testing.T) {
 			var got []map[string]any
 			srv := fakeOpenAI(t, reply, &got)
 			defer srv.Close()
-			b, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "m", "base_url": srv.URL + "/v1"}})
+			b, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "m", "endpoint": srv.URL + "/v1/chat/completions"}})
 			if _, err := b.Decide(context.Background(), nil, chatQuestions[:1]); err == nil {
 				t.Error("expected an error")
 			}
@@ -105,7 +105,7 @@ func TestChatWrite(t *testing.T) {
 	var got []map[string]any
 	srv := fakeOpenAI(t, "Hello there", &got)
 	defer srv.Close()
-	b, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "m", "base_url": srv.URL + "/v1"}})
+	b, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "m", "endpoint": srv.URL + "/v1/chat/completions"}})
 	resp, err := b.(Writer).Write(context.Background(), WriteRequest{System: "be kind", Prompt: "greet", MaxTokens: 50})
 	if err != nil || resp.Text != "Hello there" {
 		t.Fatalf("write = %+v, %v", resp, err)
@@ -130,10 +130,9 @@ func TestAnthropicWrite(t *testing.T) {
 			"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}`)
 	}))
 	defer srv.Close()
-	t.Setenv("HUNCH_TEST_ANTHROPIC", "sk-test")
 
 	b, err := New(flow.BackendConfig{Name: "anth", Kind: "anthropic", Options: map[string]any{
-		"model": "test-model", "base_url": srv.URL, "api_key_env": "HUNCH_TEST_ANTHROPIC",
+		"model": "test-model", "base_url": srv.URL, "api_key": "sk-test",
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -154,9 +153,8 @@ func TestAnthropicRefusalIsAnError(t *testing.T) {
 			"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber"},"usage":{"input_tokens":1,"output_tokens":0}}`)
 	}))
 	defer srv.Close()
-	t.Setenv("HUNCH_TEST_ANTHROPIC", "sk-test")
 	b, _ := New(flow.BackendConfig{Name: "anth", Kind: "anthropic", Options: map[string]any{
-		"model": "test-model", "base_url": srv.URL, "api_key_env": "HUNCH_TEST_ANTHROPIC",
+		"model": "test-model", "base_url": srv.URL, "api_key": "sk-test",
 	}})
 	_, err := b.(Writer).Write(context.Background(), WriteRequest{Prompt: "x"})
 	if err == nil || !strings.Contains(err.Error(), "declined") {
@@ -179,10 +177,9 @@ func TestAnthropicIgnoresSDKEnv(t *testing.T) {
 	defer elsewhere.Close()
 	t.Setenv("ANTHROPIC_BASE_URL", elsewhere.URL)
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "not-for-this-flow")
-	t.Setenv("HUNCH_TEST_ANTHROPIC", "sk-test")
 
 	b, _ := New(flow.BackendConfig{Name: "anth", Kind: "anthropic", Options: map[string]any{
-		"model": "m", "base_url": srv.URL, "api_key_env": "HUNCH_TEST_ANTHROPIC",
+		"model": "m", "base_url": srv.URL, "api_key": "sk-test",
 	}})
 	if _, err := b.(Writer).Write(context.Background(), WriteRequest{Prompt: "x"}); err != nil {
 		t.Fatal(err)
@@ -192,12 +189,10 @@ func TestAnthropicIgnoresSDKEnv(t *testing.T) {
 	}
 
 	// With no base_url, ANTHROPIC_BASE_URL still isn't used, and a missing
-	// key says which variable to set instead of trying other credentials.
-	b, _ = New(flow.BackendConfig{Name: "anth", Kind: "anthropic", Options: map[string]any{
-		"model": "m", "api_key_env": "HUNCH_TEST_UNSET_KEY",
-	}})
+	// key says where to add one instead of trying other credentials.
+	b, _ = New(flow.BackendConfig{Name: "anth", Kind: "anthropic", Options: map[string]any{"model": "m"}})
 	_, err := b.(Writer).Write(context.Background(), WriteRequest{Prompt: "x"})
-	if err == nil || !strings.Contains(err.Error(), "HUNCH_TEST_UNSET_KEY is not set") {
+	if err == nil || !strings.Contains(err.Error(), "add key: to this model in hunch.yaml") {
 		t.Errorf("err = %v", err)
 	}
 }
@@ -212,9 +207,8 @@ func TestAnthropicTimeout(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer close(done)
-	t.Setenv("HUNCH_TEST_ANTHROPIC", "sk-test")
 	b, _ := New(flow.BackendConfig{Name: "anth", Kind: "anthropic", Options: map[string]any{
-		"model": "m", "base_url": srv.URL, "api_key_env": "HUNCH_TEST_ANTHROPIC", "timeout": 0.2,
+		"model": "m", "base_url": srv.URL, "api_key": "sk-test", "timeout": 0.2,
 	}})
 	start := time.Now()
 	_, err := b.(Writer).Write(context.Background(), WriteRequest{Prompt: "x"})
@@ -225,7 +219,7 @@ func TestAnthropicTimeout(t *testing.T) {
 
 func TestNewRequiresModel(t *testing.T) {
 	for _, kind := range []string{"openai", "anthropic", "bedrock"} {
-		if _, err := New(flow.BackendConfig{Name: "x", Kind: kind}); err == nil || !strings.Contains(err.Error(), "model is required") {
+		if _, err := New(flow.BackendConfig{Name: "x", Kind: kind}); err == nil || !strings.Contains(err.Error(), "model") {
 			t.Errorf("%s: err = %v", kind, err)
 		}
 	}
@@ -247,7 +241,7 @@ func TestChatDecideSendsSchema(t *testing.T) {
 	var got []map[string]any
 	srv := fakeOpenAI(t, `{"answers": {"bug": {"probs": {"yes": 1, "no": 0}}}}`, &got)
 	defer srv.Close()
-	b, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "m", "base_url": srv.URL + "/v1"}})
+	b, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "m", "endpoint": srv.URL + "/v1/chat/completions"}})
 	if _, err := b.Decide(context.Background(), nil, chatQuestions[:1]); err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +259,7 @@ func TestChatDecideSendsSchema(t *testing.T) {
 	if _, ok := got[1]["response_format"]; ok {
 		t.Error("writes must not send a schema")
 	}
-	off, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "m", "base_url": srv.URL + "/v1", "structured": false}})
+	off, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "m", "endpoint": srv.URL + "/v1/chat/completions", "structured": false}})
 	off.Decide(context.Background(), nil, chatQuestions[:1])
 	if _, ok := got[2]["response_format"]; ok {
 		t.Error("structured: false should not send a schema")
@@ -299,7 +293,7 @@ func TestChatDecideRetriesOnce(t *testing.T) {
 		w.Write(out)
 	}))
 	defer srv.Close()
-	b, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "m", "base_url": srv.URL + "/v1"}})
+	b, _ := New(flow.BackendConfig{Name: "gpt", Kind: "openai", Options: map[string]any{"model": "m", "endpoint": srv.URL + "/v1/chat/completions"}})
 	var notes []string
 	ctx := WithStatus(context.Background(), func(s string) { notes = append(notes, s) })
 	if _, err := b.Decide(ctx, nil, chatQuestions[:1]); err != nil || calls != 2 || len(notes) != 1 {

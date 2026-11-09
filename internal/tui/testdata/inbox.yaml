@@ -1,15 +1,6 @@
 # Fixed copy of the example flow for TUI tests; the example may change.
 name: inbox-reply
 
-backends:
-  default: mock
-  mock:
-    kind: mock
-    seed: demo
-  jev:
-    kind: jev
-    provider: typesafe     # or openrouter, with $OPENROUTER_API_KEY
-
 nodes:
   worth_it:
     bool: "Does this message from {{sender}} need a response from me? Message: {{message}}"

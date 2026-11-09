@@ -4,15 +4,9 @@
 #   hunch test examples/hello.yaml
 #   hunch tui examples/hello.yaml
 #
-# Jev decides, so put TYPESAFE_API_KEY=... in .env. --backend mock runs
-# offline, but mock makes its answers up, so the tests fail on it.
+# The models come from hunch.yaml. --model mock runs offline, but mock makes
+# its answers up, so the tests fail on it.
 name: hello
-
-backends:
-  default: jev
-  jev: {kind: jev, provider: typesafe}  # needs TYPESAFE_API_KEY
-  laya: {kind: jev, provider: laya}       # --backend laya: Laya on this machine (laya-serve)
-  mock: {kind: mock, seed: demo}        # --backend mock: offline, made-up answers
 
 nodes:
   worth_it:

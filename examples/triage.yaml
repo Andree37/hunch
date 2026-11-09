@@ -11,16 +11,6 @@
 # The test cases fake the fetch and never write: hunch test examples/triage.yaml
 name: network-triage
 
-backends:
-  default: jev        # decides: whose ticket, which severity, the facts, the note check
-  writer: local
-  jev: {kind: jev, provider: typesafe}
-  laya: {kind: jev, provider: laya}       # --backend laya: Laya on this machine (laya-serve)
-  # Models on this machine via Ollama (ollama pull qwen2.5:1.5b).
-  local: {kind: openai, base_url: "http://localhost:11434/v1", model: "qwen2.5:0.5b"}
-  notes: {kind: openai, base_url: "http://localhost:11434/v1", model: "qwen2.5:1.5b"}
-  mock: {kind: mock, seed: demo}
-
 state:
   # What each team handles. Written once, used by the ownership question and
   # in the note a rerouted ticket gets.
@@ -183,7 +173,6 @@ nodes:
 
   explain:
     action: llm
-    backend: notes
     system: >-
       You write one short internal note for a support ticket explaining a
       severity change. Use only the facts given. Do not answer the customer,

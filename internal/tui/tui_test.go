@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -23,6 +24,38 @@ import (
 	"github.com/Andree37/hunch/internal/runner"
 	"github.com/Andree37/hunch/internal/trace"
 )
+
+// writeFlow writes a test flow: the flow, then after a --- line the
+// models, written to a hunch.yaml next to it. A flow without models gets
+// an empty hunch.yaml (so mock), unless one is there already.
+func writeFlow(t *testing.T, path string, src []byte, perm os.FileMode) {
+	t.Helper()
+	flowSrc, models, ok := bytes.Cut(src, []byte("\n---\n"))
+	if err := os.WriteFile(path, append(flowSrc, '\n'), perm); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(filepath.Dir(path), "hunch.yaml")
+	if _, err := os.Stat(project); !ok && err == nil {
+		return
+	}
+	if err := os.WriteFile(project, models, perm); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// copyInbox copies the test flow to path, with its hunch.yaml.
+func copyInbox(t *testing.T, path string) {
+	t.Helper()
+	for from, to := range map[string]string{"testdata/inbox.yaml": path, "testdata/hunch.yaml": filepath.Join(filepath.Dir(path), "hunch.yaml")} {
+		data, err := os.ReadFile(from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(to, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 // drive feeds cmd results back into the model until the run finishes.
 func drive(t *testing.T, m *Model, cmd tea.Cmd) {
@@ -92,10 +125,11 @@ func TestRunAndPoke(t *testing.T) {
 func TestTypeSaveAsCaseAndCheck(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.yaml")
-	os.WriteFile(path, []byte(`backends: {m: {kind: mock, answers: {a: yes}}}
-nodes:
+	writeFlow(t, path, []byte(`nodes:
   a: {bool: "Reply to {{who}}?", then: {yes: b, no: b}}
   b: {action: log, message: "{{a.answer}}"}
+---
+models: {m: {url: mock, answers: {a: yes}}}
 `), 0o644)
 
 	m, err := New(path, nil, "", true)
@@ -217,7 +251,7 @@ func TestStopPausedRun(t *testing.T) {
 
 func TestTypedInputs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "f.yaml")
-	os.WriteFile(path, []byte(`inputs:
+	writeFlow(t, path, []byte(`inputs:
   channel: [email, slack, sms]
   vip: {type: bool}
   count: {type: number, min: 1, max: 5}
@@ -390,11 +424,12 @@ func TestRunAndMapViews(t *testing.T) {
 // A node reached from two places is only marked on the branch the run took.
 func TestMapMarksTheBranchTaken(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "f.yaml")
-	os.WriteFile(path, []byte(`backends: {m: {kind: mock, answers: {a: no}}}
-nodes:
+	writeFlow(t, path, []byte(`nodes:
   a: {bool: "?", then: {yes: b, no: end}}
   b: {choice: "?", options: [x, y], then: {x: end, y: end}}
   end: {action: log, message: done}
+---
+models: {m: {url: mock, answers: {a: no}}}
 `), 0o644)
 	m, _ := New(path, nil, "", false)
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
@@ -413,10 +448,11 @@ nodes:
 func TestRunHighlightedTest(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.yaml")
-	os.WriteFile(path, []byte(`backends: {m: {kind: mock, answers: {a: yes}}}
-nodes:
+	writeFlow(t, path, []byte(`nodes:
   a: {bool: "Reply to {{who}}?", then: {yes: b, no: b}}
   b: {action: log, message: "{{who}}"}
+---
+models: {m: {url: mock, answers: {a: yes}}}
 `), 0o644)
 	os.MkdirAll(filepath.Join(dir, "f.tests"), 0o755)
 	os.WriteFile(filepath.Join(dir, "f.tests", "ann.yaml"), []byte("input: {who: ann}\n"), 0o644)
@@ -489,9 +525,10 @@ func TestTUIRunsAreRecorded(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.yaml")
 	// A real backend that's never called: the flow only has actions.
-	os.WriteFile(path, []byte(`backends: {local: {kind: openai, base_url: "http://127.0.0.1:1", model: x}}
-nodes:
+	writeFlow(t, path, []byte(`nodes:
   hi: {action: log, message: "hi {{sender}}"}
+---
+models: {local: {url: "http://127.0.0.1:1/v1/chat/completions", model: x}}
 `), 0o644)
 	m, err := New(path, map[string]any{"sender": "carol"}, "", false)
 	if err != nil {
@@ -519,8 +556,7 @@ nodes:
 
 func TestMockRunsAreNotRecorded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "f.yaml")
-	src, _ := os.ReadFile("testdata/inbox.yaml")
-	os.WriteFile(path, src, 0o644)
+	copyInbox(t, path)
 	m, _ := New(path, map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
 	m.record = true
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
@@ -534,7 +570,7 @@ func TestMockRunsAreNotRecorded(t *testing.T) {
 // Long output is wrapped under its step, and enter opens the step in full.
 func TestLongOutputWrapsAndOpens(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "f.yaml")
-	os.WriteFile(path, []byte(`nodes:
+	writeFlow(t, path, []byte(`nodes:
   say: {action: log, message: "{{text}}"}
 `), 0o644)
 	long := strings.Repeat("the fridge is in the oven ", 30) + "END"
@@ -588,14 +624,15 @@ func TestGridRunsEveryTestAndRerunsOnSave(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.yaml")
 	flowSrc := func(answer string) []byte {
-		return []byte(`backends: {m: {kind: mock, answers: {a: ` + answer + `}}}
-nodes:
+		return []byte(`nodes:
   a: {bool: "Reply to {{who}}?", then: {yes: b, no: c}}
   b: {action: log, message: replied}
   c: {action: log, message: archived}
+---
+models: {m: {url: mock, answers: {a: ` + answer + `}}}
 `)
 	}
-	os.WriteFile(path, flowSrc("yes"), 0o644)
+	writeFlow(t, path, flowSrc("yes"), 0o644)
 	os.MkdirAll(filepath.Join(dir, "f.tests"), 0o755)
 	os.WriteFile(filepath.Join(dir, "f.tests", "ann.yaml"), []byte("input: {who: ann}\nexpect: {a: yes}\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "f.tests", "bob.yaml"), []byte("input: {who: bob}\nexpect: {a: no}\n"), 0o644)
@@ -630,7 +667,7 @@ nodes:
 	}
 
 	// Saving the flow runs every test again and marks what changed.
-	os.WriteFile(path, flowSrc("no"), 0o644)
+	writeFlow(t, path, flowSrc("no"), 0o644)
 	m.modTime = time.Time{}
 	_, cmd = m.Update(tickMsg{})
 	pumpGrid(t, m, cmd)
@@ -645,13 +682,14 @@ nodes:
 func TestThresholdKeysRerouteWithoutTheModel(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.yaml")
-	os.WriteFile(path, []byte(`threshold: 0.9
-backends: {m: {kind: mock, answers: {a: yes}}}
+	writeFlow(t, path, []byte(`threshold: 0.9
 nodes:
   a: {bool: "Reply to {{who}}?", then: {yes: b, no: c, unsure: ask}}
   ask: {bool: "Ask a person?", then: {yes: b, no: c}}
   b: {action: log, message: replied}
   c: {action: log, message: archived}
+---
+models: {m: {url: mock, answers: {a: yes}}}
 `), 0o644)
 	os.MkdirAll(filepath.Join(dir, "f.tests"), 0o755)
 	os.WriteFile(filepath.Join(dir, "f.tests", "ann.yaml"), []byte("input: {who: ann}\nexpect: {a: yes}\n"), 0o644)
@@ -733,8 +771,7 @@ nodes:
 func TestThresholdsArePerQuestionAndKept(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.yaml")
-	os.WriteFile(path, []byte(`threshold: 0.9
-backends: {m: {kind: mock, answers: {a: yes, b: yes}}}
+	writeFlow(t, path, []byte(`threshold: 0.9
 nodes:
   # first question
   a: {bool: "Reply to {{who}}?", then: {yes: b, no: done, unsure: done}}
@@ -742,6 +779,8 @@ nodes:
     bool: "Urgent?"   # second question
     then: {yes: done, no: done, unsure: done}
   done: {action: log, message: ok}
+---
+models: {m: {url: mock, answers: {a: yes, b: yes}}}
 `), 0o644)
 	os.MkdirAll(filepath.Join(dir, "f.tests"), 0o755)
 	os.WriteFile(filepath.Join(dir, "f.tests", "ann.yaml"), []byte("input: {who: ann}\n"), 0o644)
@@ -790,12 +829,13 @@ func TestHelp(t *testing.T) {
 
 func TestActionNodesAndDryRun(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "f.yaml")
-	os.WriteFile(path, []byte(`backends: {m: {kind: mock, answers: {ok: yes}}}
-nodes:
+	writeFlow(t, path, []byte(`nodes:
   draft: {action: llm, prompt: "Reply to {{who}}", then: ok}
   ok: {bool: "Send it?", then: {yes: send, no: result}}
   send: {action: http, url: "https://example.invalid/post", body: {text: "{{draft.text}}"}, then: result}
   result: {action: output, set: {action: sent, to: "{{who}}"}}
+---
+models: {m: {url: mock, answers: {ok: yes}}}
 `), 0o644)
 	m, err := New(path, map[string]any{"who": "ann"}, "", false)
 	if err != nil {
@@ -824,7 +864,7 @@ nodes:
 
 func TestSwitchNode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "f.yaml")
-	os.WriteFile(path, []byte(`nodes:
+	writeFlow(t, path, []byte(`nodes:
   scope: {switch: "{{format}}", then: {pdf: in, _: out}}
   in: {action: output, set: {scope: in}}
   out: {action: output, set: {scope: out}}
@@ -958,8 +998,7 @@ func TestReplayShowsRecordedBackend(t *testing.T) {
 func TestSaveReplayedRunAsTest(t *testing.T) {
 	dir := t.TempDir()
 	flowPath := filepath.Join(dir, "inbox.yaml")
-	src, _ := os.ReadFile("testdata/inbox.yaml")
-	os.WriteFile(flowPath, src, 0o644)
+	copyInbox(t, flowPath)
 	runs := recordRunsFor(t, flowPath, map[string]any{"sender": "carol", "message": "hi"})
 
 	m, err := New(flowPath, nil, "mock", false)
@@ -1001,7 +1040,7 @@ func TestRunsIncludeRolledOverFiles(t *testing.T) {
 	data, _ := os.ReadFile(older)
 	os.WriteFile(path+".1", data, 0o644)
 	data, _ = os.ReadFile(newer)
-	os.WriteFile(path, data, 0o644)
+	writeFlow(t, path, data, 0o644)
 
 	m, _ := New("testdata/inbox.yaml", nil, "mock", false)
 	if err := m.SetRuns(path); err != nil {
@@ -1059,7 +1098,7 @@ func TestRunsFromADirectory(t *testing.T) {
 
 func TestReplayedActionsShowTheirResults(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "f.yaml")
-	os.WriteFile(path, []byte(`nodes:
+	writeFlow(t, path, []byte(`nodes:
   post: {action: http, url: "https://example.invalid", then: done}
   done: {action: output, set: {action: sent}}
 `), 0o644)
@@ -1096,7 +1135,7 @@ func TestRunsOfOtherFlowsAreHidden(t *testing.T) {
 	other := filepath.Join(t.TempDir(), "other.yaml")
 	os.WriteFile(other, []byte(`nodes: {fetch: {action: log, message: hi}}`), 0o644)
 
-	m, _ := New(other, nil, "", false)
+	m, _ := New(other, nil, "mock", false)
 	m.SetRuns(runs)
 	m.Update(tea.WindowSizeMsg{Width: 170, Height: 40})
 	screen := ansi.Strip(m.View())
@@ -1115,7 +1154,7 @@ func TestRunsOfOtherFlowsAreHidden(t *testing.T) {
 func TestRunOfOlderVersionIsMarked(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.yaml")
-	os.WriteFile(path, []byte(`nodes: {a: {action: log, message: one, then: b}, b: {action: log, message: two}}`), 0o644)
+	writeFlow(t, path, []byte(`nodes: {a: {action: log, message: one, then: b}, b: {action: log, message: two}}`), 0o644)
 	f, _ := flow.Load(path)
 	runsPath := filepath.Join(dir, "runs.jsonl")
 	file, _ := os.Create(runsPath)
@@ -1125,7 +1164,7 @@ func TestRunOfOlderVersionIsMarked(t *testing.T) {
 	rec.End("r1", res, err)
 	file.Close()
 
-	os.WriteFile(path, []byte(`nodes: {a: {action: log, message: one}}`), 0o644) // b removed
+	writeFlow(t, path, []byte(`nodes: {a: {action: log, message: one}}`), 0o644) // b removed
 	m, _ := New(path, nil, "", false)
 	m.SetRuns(runsPath)
 	m.Update(tea.WindowSizeMsg{Width: 170, Height: 40})
@@ -1140,8 +1179,7 @@ func TestRunOfOlderVersionIsMarked(t *testing.T) {
 func TestFlowRunsLoadWithoutFlags(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.yaml")
-	src, _ := os.ReadFile("testdata/inbox.yaml")
-	os.WriteFile(path, src, 0o644)
+	copyInbox(t, path)
 
 	// Nothing recorded yet: no runs, and reading doesn't create the folder.
 	m, err := New(path, nil, "mock", false)
@@ -1206,8 +1244,7 @@ func TestFindFlows(t *testing.T) {
 
 func TestPickerOpensAFlowAndComesBack(t *testing.T) {
 	dir := t.TempDir()
-	src, _ := os.ReadFile("testdata/inbox.yaml")
-	os.WriteFile(filepath.Join(dir, "a.yaml"), src, 0o644)
+	copyInbox(t, filepath.Join(dir, "a.yaml"))
 	os.WriteFile(filepath.Join(dir, "not-a-flow.yaml"), []byte("hello: world\n"), 0o644)
 
 	a := NewApp(dir, OpenOptions{FromCase: true})
@@ -1271,12 +1308,13 @@ func TestTryingAThresholdNeverFetches(t *testing.T) {
 	defer srv.Close()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.yaml")
-	os.WriteFile(path, []byte(`threshold: 0.9
-backends: {m: {kind: mock, answers: {a: yes}}}
+	writeFlow(t, path, []byte(`threshold: 0.9
 nodes:
   a: {bool: "Reply to {{who}}?", then: {yes: b, no: b, unsure: fetch}}
   fetch: {action: http, method: GET, url: "`+srv.URL+`", then: b}
   b: {action: log, message: done}
+---
+models: {m: {url: mock, answers: {a: yes}}}
 `), 0o644)
 	os.MkdirAll(filepath.Join(dir, "f.tests"), 0o755)
 	os.WriteFile(filepath.Join(dir, "f.tests", "ann.yaml"), []byte("input: {who: ann}\nexpect: {a: yes}\n"), 0o644)
@@ -1294,7 +1332,7 @@ nodes:
 func TestGridScrollsToTheSelectedTest(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.yaml")
-	os.WriteFile(path, []byte(`nodes:
+	writeFlow(t, path, []byte(`nodes:
   a: {bool: "Reply to {{who}}?", then: {yes: b, no: b}}
   b: {action: log, message: done}
 `), 0o644)
@@ -1357,5 +1395,40 @@ func TestCompareTwoRecordedRuns(t *testing.T) {
 	m.compare = &comparison{a: m.runs[0], b: m.runs[0]}
 	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "Same input") || !strings.Contains(screen, "Same path") || !strings.Contains(screen, "Every answer is the same.") {
 		t.Errorf("same run:\n%s", screen)
+	}
+}
+
+func TestPickAModel(t *testing.T) {
+	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "carol", "message": "hi"}, "", false)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if m.backend != "mock" {
+		t.Fatalf("default from hunch.yaml: %q", m.backend)
+	}
+	m.Update(press("b"))
+	screen := ansi.Strip(m.View())
+	for _, want := range []string{"Models", "mock", "decides", "jev", "decision model", "https://api.typesafe.ai/v1/systemone", "testdata/hunch.yaml"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("model list missing %q:\n%s", want, screen)
+		}
+	}
+	m.Update(press("j"))
+	m.Update(press("w"))
+	if !m.picking || !strings.Contains(m.flash, "only decides") {
+		t.Errorf("jev can't write: picking=%v flash=%q", m.picking, m.flash)
+	}
+	m.Update(press("enter"))
+	if m.picking || m.backend != "jev" || !strings.Contains(m.flash, "deciding with jev") {
+		t.Errorf("enter: picking=%v backend=%q", m.picking, m.backend)
+	}
+}
+
+func TestNoProjectSaysHowToStart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f.yaml")
+	os.WriteFile(path, []byte("nodes: {a: {action: log, message: hi}}\n"), 0o644)
+	if _, err := New(path, nil, "", false); err == nil || !strings.Contains(err.Error(), "no hunch.yaml") || !strings.Contains(err.Error(), "--model mock") {
+		t.Errorf("err = %v", err)
+	}
+	if _, err := New(path, nil, "mock", false); err != nil {
+		t.Errorf("mock needs no hunch.yaml: %v", err)
 	}
 }

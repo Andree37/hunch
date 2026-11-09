@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"strings"
 
 	"github.com/Andree37/hunch/internal/flow"
 )
@@ -16,28 +14,30 @@ import (
 // openAIChat talks to any OpenAI-compatible chat completions endpoint:
 // OpenAI itself, Ollama, OpenRouter, vLLM, LM Studio... Options:
 //
+//	endpoint:    the chat completions URL, e.g. http://localhost:11434/v1/chat/completions
 //	model:       required
-//	base_url:    default https://api.openai.com/v1 (Ollama: http://localhost:11434/v1)
-//	api_key_env: default OPENAI_API_KEY; may be unset for local servers
+//	api_key:     sent when set (local servers need none)
+//	key_header:  "api-key" for Azure OpenAI; otherwise a bearer token
 //	structured:  default true; decisions send a JSON schema the server must
 //	             follow (response_format). Set false if a server rejects it.
 type openAIChat struct {
-	url, model, keyEnv string
-	structured         bool
-	opts               map[string]any
-	client             *http.Client
+	url, model, key, keyHeader string
+	structured                 bool
+	opts                       map[string]any
+	client                     *http.Client
 }
 
 func newOpenAI(cfg flow.BackendConfig) (*chatBackend, error) {
 	o := cfg.Options
 	model := optString(o, "model", "")
 	if model == "" {
-		return nil, fmt.Errorf("backend %q: model is required", cfg.Name)
+		return nil, fmt.Errorf("model %q: say which model the server should run (model: ...)", cfg.Name)
 	}
 	m := &openAIChat{
-		url:        strings.TrimSuffix(optString(o, "base_url", "https://api.openai.com/v1"), "/") + "/chat/completions",
+		url:        optString(o, "endpoint", "https://api.openai.com/v1/chat/completions"),
 		model:      model,
-		keyEnv:     optString(o, "api_key_env", "OPENAI_API_KEY"),
+		key:        optString(o, "api_key", ""),
+		keyHeader:  optString(o, "key_header", ""),
 		structured: o["structured"] != false,
 		opts:       o,
 		client:     &http.Client{Timeout: optSeconds(o, "timeout", 120)},
@@ -70,8 +70,11 @@ func (m *openAIChat) chat(ctx context.Context, r chatRequest) (string, float64, 
 		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if key := os.Getenv(m.keyEnv); key != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
+	switch {
+	case m.key != "" && m.keyHeader != "":
+		req.Header.Set(m.keyHeader, m.key)
+	case m.key != "":
+		req.Header.Set("Authorization", "Bearer "+m.key)
 	}
 	resp, err := m.client.Do(req)
 	if err != nil {

@@ -2,12 +2,13 @@
 
 Decision flows with typed, calibrated answers.
 
-A flow is a YAML graph. **Decision nodes** ask a backend a typed question
+A flow is a YAML graph. **Decision nodes** ask a model a typed question
 (`bool`, `choice`, `score`, or several at once) and branch on the answer and
 its confidence. **Action nodes** do things. Every result lands in shared state,
 so later nodes build on earlier ones via `{{node.field}}` refs.
 
-Backends are swappable: Jev, local models, or the built-in deterministic mock.
+Models are swappable: Jev, Laya, chat models, or the built-in deterministic
+mock, listed once per project in `hunch.yaml` (see [Models](#models)).
 
 ```sh
 go run ./cmd/hunch tui examples/inbox.yaml
@@ -19,9 +20,6 @@ go run ./cmd/hunch run examples/inbox.yaml --set sender=boss --set message="Can 
 ```yaml
 name: example
 threshold: 0.6          # below this confidence, `unsure` routes win (default 0.6)
-backends:
-  default: mock
-  mock: {kind: mock, seed: demo}
 nodes:
   gate:                 # the first node is the start (or set `start:`)
     bool: "Does {{who}} need an answer?"
@@ -101,19 +99,13 @@ under its node name, so later nodes can use it.
 |---|---|---|
 | `log` (shown as SAY) | `message` | `message` |
 | `shell` | `run`, `timeout` (s, default 60) | `stdout`, `exit_code` |
-| `llm` | `prompt`, `system`, `max_tokens`, `backend` | `text` |
+| `llm` | `prompt`, `system`, `max_tokens`, `model` | `text` |
 | `http` | `url`, `method` (default POST), `headers`, `body`, `timeout` (s, default 30), `retries` (default 2), `idempotency_key` | `status`, `body` (parsed if JSON) |
 | `output` | `set: {name: value}` | the values; also the flow's **outputs** |
 
 ```yaml
-backends:
-  default: jev          # decides
-  writer: local         # writes, for llm nodes
-  jev: {kind: jev}
-  local: {kind: openai, base_url: "http://localhost:11434/v1", model: "qwen2.5:1.5b"}
-
 nodes:
-  draft:
+  draft:                # written by hunch.yaml's writer (or model: on the node)
     action: llm
     system: You write short, friendly first replies.
     prompt: "Reply to: {{message}}"
@@ -124,7 +116,7 @@ nodes:
   send:
     action: http
     url: "{{post_url}}"
-    headers: {Authorization: "Bearer $API_TOKEN"}   # $VARS come from the environment / .env
+    headers: {Authorization: "Bearer $API_TOKEN"}   # $VARS come from the environment
     body: {reply: "{{draft.text}}"}
     then: sent
   sent: {action: output, set: {action: sent}}
@@ -270,7 +262,7 @@ fetches the ticket from `TICKETS_API` and:
    picks the severity under the SLA, only the same or lower.
 3. Jev establishes the facts the SLA turns on in one multi-question call: no
    connection at all? workaround? how many people? what kind of ticket?
-4. A local Ollama model (the `notes` backend) writes the note from the SLA,
+4. The writer model (Ollama on this machine, say) writes the note from the SLA,
    the decision and those facts; Jev checks it, and a plain note built from
    the facts is posted if it's off.
 
@@ -291,66 +283,87 @@ Each is a different shape of the same building blocks; none is special.
 
 Each has a `<flow>.tests/` folder you can run with `hunch test`.
 
-## Keys
+## Models
 
-Put API keys in `.env` (gitignored; see `.env.example`). Variables already set in
-your environment take precedence.
+Flows don't say which models they use. `hunch.yaml`, in the flow's folder or
+any folder above it, lists them once for the whole project:
 
-## Backends
+```yaml
+default: jev       # decides, unless --model or b in the TUI says otherwise
+writer: ollama     # writes text for llm nodes (optional)
+
+models:
+  jev:    {url: https://api.typesafe.ai/v1/systemone, key: tsk-...}
+  laya:   http://localhost:8000/v1/systemone
+  claude: {url: https://api.anthropic.com/v1/messages, key: sk-ant-..., model: claude-opus-5-5}
+  ollama: {url: http://localhost:11434/v1/chat/completions, model: "qwen2.5:1.5b"}
+  gpt:    {url: https://my-team.openai.azure.com/openai/v1/chat/completions, key: ..., model: gpt-5}
+  nova:   {url: https://bedrock-runtime.us-east-1.amazonaws.com, model: amazon.nova-pro-v1:0}
+```
+
+A model is the URL of its endpoint. A plain string is just the URL; a map
+adds `key` (sent as the server expects it) and `model` (when the server runs
+several). The path says which API it speaks:
+
+| Endpoint | Speaks | Decides | Writes |
+|---|---|---|---|
+| `.../v1/systemone`, `.../decisions` | Jev's decision API: Jev (TypeSafe, OpenRouter's `.../api/alpha/decisions`, Runware), Laya | ✓ calibrated | |
+| `.../chat/completions` | OpenAI-style chat: OpenAI, Ollama, OpenRouter, Groq, vLLM, LM Studio, Azure OpenAI | ✓ self-reported | ✓ |
+| `.../v1/messages` | Anthropic | ✓ self-reported | ✓ |
+| `https://bedrock-runtime.REGION.amazonaws.com` | Amazon Bedrock (your AWS login, no key; `profile` picks one) | ✓ self-reported | ✓ |
+
+A URL whose path says none of these is refused with the endpoints to give
+instead. `mock` is always there (deterministic, offline, made-up answers);
+`mock: {answers: {node: value}}` forces answers, and any name with
+`url: mock` is a mock too.
+
+- **Keys**: `hunch.yaml` holds them, so keep it out of git. `key: $NAME`
+  reads one from the environment instead, for files you do commit.
+- **Picking**: `--model` picks who decides and `--writer` who writes, on
+  `run`, `test` and `tui`; in the TUI, `b` lists the models (`enter` decides
+  with one, `w` writes with one). A node can say `model: claude` to always
+  use one.
+- **Other options** pass through: `timeout` (seconds; 30 for decision
+  models, 120 for chat, 0 for no limit), `max_tokens`, `price_in_per_mtok` /
+  `price_out_per_mtok` (and `price_per_mtok` for decision models) to report
+  cost, and `structured: false` for an OpenAI-style server that rejects JSON
+  schemas.
+- With no `hunch.yaml`, every command says how to start one; `--model mock`
+  still runs a flow offline.
+
+```sh
+hunch test examples/respond.yaml --model jev                     # 3/3
+hunch test examples/respond.yaml --model ollama --writer ollama  # a 1.5B local model: 1/3
+```
+
+Routing on confidence (`unsure`, `threshold`) is most meaningful with
+decision models. The validator warns when a chat model's self-reported
+confidence drives a route, and the TUI marks those numbers `self-reported`;
+check such thresholds against your test cases.
+
+For decisions, OpenAI-style models are sent a JSON schema the server must
+follow (structured outputs), which small local models need to answer in the
+right shape. Replies are parsed leniently and a reply that still doesn't fit
+is asked for once more. Anthropic models use only the key and URL in
+`hunch.yaml`; `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and SDK profiles
+in the environment are ignored.
+
+### Laya on your machine
 
 Laya is a small open decision model (about 421M parameters) that speaks
-Jev's API. Run it locally and point a backend at it:
+Jev's API:
 
 ```sh
 python -m pip install "laya[serve]"   # Python 3.10+
-laya-serve                            # http://localhost:8000; downloads its checkpoints on first start
+laya-serve                            # http://localhost:8000; LAYA_MODELS=english loads only the English model
 ```
 
-```yaml
-backends:
-  laya: {kind: jev, provider: laya}   # http://localhost:8000/v1/systemone, no key
-```
-
-`url:` points elsewhere; if the server was started with `LAYA_API_KEY`, set
-the same variable for hunch. Laya is much smaller than Jev and its
-probabilities can be overconfident, so check your thresholds against the
-tests (`R`, then `[` `]`) before trusting it.
-
-Any backend can make decisions. Chat-model backends can also write text for
-`llm` nodes. Chat models report their own confidence, so their probabilities
-aren't calibrated the way Jev's are.
-
-| Kind | Decides | Writes | Options |
-|---|---|---|---|
-| `mock` | ✓ | ✓ | Deterministic, offline. `answers: {node: value}` forces answers. |
-| `jev` | ✓ | | TypeSafe's Jev via `provider: typesafe` (`$TYPESAFE_API_KEY`) or `openrouter` (`$OPENROUTER_API_KEY`); or Convai's Laya on this machine via `provider: laya` (no key; see below). |
-| `openai` | ✓ | ✓ | Any OpenAI-compatible server: OpenAI, Ollama (`base_url: http://localhost:11434/v1`), OpenRouter, vLLM, LM Studio. `model`, `base_url`, `api_key_env` (default `OPENAI_API_KEY`). |
-| `anthropic` | ✓ | ✓ | Models via the Anthropic API. `model` (the model ID), `api_key_env` (default `ANTHROPIC_API_KEY`), `base_url`. |
-| `bedrock` | ✓ | ✓ | Any Amazon Bedrock model via the Converse API. `model` (model or inference profile ID), `region`, `profile`; AWS credentials from the usual chain. |
-
-Routing on confidence (`unsure`, `threshold`) is most meaningful with Jev.
-The validator warns when a chat model's self-reported confidence drives a
-route, and the TUI marks those numbers `self-reported`; check such
-thresholds against your test cases.
-
-Swap models per run without editing the flow: `--backend` picks who decides
-and `--writer` who writes, on `run`, `test` and `tui`.
-
-```sh
-hunch test examples/respond.yaml --backend jev                    # 3/3
-hunch test examples/respond.yaml --backend ollama --writer ollama # a 1.5B local model: 1/3
-```
-
-For decisions, `openai` backends send a JSON schema the server must follow
-(structured outputs), which small local models need to answer in the right
-shape; set `structured: false` for a server that rejects it. Replies are
-parsed leniently and a reply that still doesn't fit is asked for once more.
-
-Chat backends also take `max_tokens`, `timeout` (seconds, default 120; 0 means no limit), and
-`price_in_per_mtok` / `price_out_per_mtok` to report cost. An `anthropic`
-backend reads its key only from `api_key_env` (default `ANTHROPIC_API_KEY`)
-and its endpoint only from `base_url`; `ANTHROPIC_BASE_URL`,
-`ANTHROPIC_AUTH_TOKEN` and SDK profiles in the environment are ignored.
+and in `hunch.yaml`, `laya: http://localhost:8000/v1/systemone`. Run on a
+server (an Azure Container App, say), it's the same with that URL and the
+`LAYA_API_KEY` the server was started with as `key`. hunch reads Laya's
+confidence on Jev's scale (`x_jev_confidence`). It is much smaller than Jev
+and can be overconfident, so check your thresholds against the tests (`R`,
+then `[` `]`) before trusting it.
 
 ## Test cases
 
@@ -383,8 +396,8 @@ http:
     body: {title: "Logo blurry", status: open}
 ```
 
-`hunch test examples/inbox.yaml --backend jev` runs every case and reports
-pass/fail, which is also how you compare backends: the mock passes 0/3 of the
+`hunch test examples/inbox.yaml --model jev` runs every case and reports
+pass/fail, which is also how you compare models: the mock passes 0/3 of the
 example cases, Jev 3/3.
 
 ## TUI
@@ -401,7 +414,7 @@ runs it has. `F` inside a flow goes back to it.
 The screen reads left to right: what goes in, what happened, and why.
 
 - **Header**: the flow, where the input came from (a test, a recorded run, or
-  typed), the backend, and dry run or LIVE. On the right, how the run went:
+  typed), the model, and dry run or LIVE. On the right, how the run went:
   how many expectations held, steps, cost and time, or what is running now.
 - **2 Tests** (top left): `✓`/`✗` from the last run of each case. `r` runs
   the highlighted one (`s` steps through it); `enter` only loads it. `t` switches to the flow's **recorded runs**, two lines each: when
@@ -453,7 +466,7 @@ The screen reads left to right: what goes in, what happened, and why.
 
 The footer lists the keys that matter where you are; `?` lists them all.
 `r` run · `R` run every test · `g` back to all tests · `←`/`→` pick a question · `[`/`]` try its threshold · `w` keep thresholds · `A` ask what `?` tests need · `s` step one node · `x` stop · `m` run / map · `1-4` jump to pane ·
-`tab` next pane · `j/k` move · `enter` load / open / edit · `b` switch backend ·
+`tab` next pane · `j/k` move · `enter` load / open / edit · `b` pick a model ·
 `L` live / dry run · `a`/`d` add / delete input · `w` save case · `n` save as
 new case · `t` tests / recorded runs · `c` compare two runs · `o` runs from elsewhere · `esc` close a
 recorded run · `F` flow picker · `q` quit
@@ -464,6 +477,6 @@ Every command checks the flow when it loads it (dangling routes, impossible
 branches, uncovered answers, unreachable nodes, loops, refs to nodes that
 haven't run yet) and stops on errors.
 
-- `hunch tui [FLOW] [--backend name] [--writer name] [--set k=v]... [--state f.json] [--runs place]`: without FLOW, pick one
-- `hunch test FLOW [--backend name] [--live] [case...]`: run test cases, check expectations. `shell` and `http` write nodes only record unless `--live`.
-- `hunch run FLOW [--backend name] [--case name] [--set k=v]... [--state f.json] [--trace f.jsonl] [--json] [--max-visits N]`
+- `hunch tui [FLOW] [--model name] [--writer name] [--set k=v]... [--state f.json] [--runs place]`: without FLOW, pick one
+- `hunch test FLOW [--model name] [--live] [case...]`: run test cases, check expectations. `shell` and `http` write nodes only record unless `--live`.
+- `hunch run FLOW [--model name] [--case name] [--set k=v]... [--state f.json] [--trace f.jsonl] [--json] [--max-visits N]`

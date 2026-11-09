@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Retake the README screenshot (docs/demo/tui-<date>.png).
-# Needs vhs (brew install vhs) and TYPESAFE_API_KEY in .env. The date in the
+# Needs vhs (brew install vhs) and a hunch.yaml with jev. The date in the
 # name keeps GitHub from showing an old one from its cache.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"

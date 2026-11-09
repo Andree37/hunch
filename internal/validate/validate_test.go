@@ -9,7 +9,8 @@ import (
 
 func check(t *testing.T, src string) []Issue {
 	t.Helper()
-	f, err := flow.Parse([]byte(src))
+	flowSrc, models, _ := strings.Cut(src, "\n---\n")
+	f, err := flow.ParseWithProject([]byte(flowSrc), []byte(models))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,14 +54,14 @@ func TestIssues(t *testing.T) {
 		{"branches on action", `nodes: {a: {action: log, message: m, then: {x: a}}}`, Error, "single target"},
 		{"unreachable", `nodes: {a: {action: log, message: m}, b: {action: log, message: m}}`, Warning, "unreachable"},
 		{"loop", `nodes: {a: {bool: q, then: {yes: a, no: b}}, b: {action: log, message: m}}`, Warning, "loops back"},
-		{"unknown backend", `nodes: {a: {bool: q, backend: jev, then: a}}`, Error, `backend "jev" is not defined`},
+		{"unknown model", `nodes: {a: {bool: q, model: jev, then: a}}`, Error, `model "jev" is not in hunch.yaml`},
 		{"unused answer", `nodes: {a: {bool: q}}`, Warning, "never used"},
-		{"llm on jev", `{backends: {default: j, j: {kind: jev}}, nodes: {a: {action: llm, prompt: p}}}`, Error, `backend "j" (jev) can't write text`},
-		{"llm unknown writer", `{backends: {writer: w, m: {kind: mock}}, nodes: {a: {action: llm, prompt: p}}}`, Error, `backend "w" is not defined`},
+		{"llm on jev", "nodes: {a: {action: llm, prompt: p}}\n---\nmodels: {j: http://x/v1/systemone}", Error, `model "j" is a decision model and can't write text`},
+		{"llm unknown model", `nodes: {a: {action: llm, prompt: p, model: w}}`, Error, `model "w" is not in hunch.yaml`},
 		{"switch unsure", `nodes: {a: {switch: "{{x}}", then: {unsure: a, _: a}}}`, Error, "never unsure"},
 		{"switch no default", `nodes: {a: {switch: "{{x}}", then: {v: a}}}`, Warning, "any other value stops the run"},
 		{"sees a later node", `nodes: {a: {bool: q, sees: [b.answer], then: b}, b: {action: log, message: m}}`, Error, "never runs before"},
-		{"unsure on self-reported", `{backends: {default: c, c: {kind: anthropic, model: m}}, nodes: {a: {bool: q, then: {yes: a, no: a, unsure: a}}}}`, Warning, "reports its own confidence"},
+		{"unsure on self-reported", "nodes: {a: {bool: q, then: {yes: a, no: a, unsure: a}}}\n---\nmodels: {c: {url: https://api.anthropic.com/v1/messages, model: m}}", Warning, "reports its own confidence"},
 		{"unused input", `{inputs: {x: [a, b]}, nodes: {a: {action: log, message: m}}}`, Warning, `input "x" is declared but no node uses it`},
 		{"ref to later node", `nodes: {a: {bool: "{{b.answer}}?", then: b}, b: {action: log, message: m}}`, Error, "never runs before"},
 	}

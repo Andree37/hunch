@@ -1,15 +1,14 @@
 package flow
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestParseActions(t *testing.T) {
-	f, err := Parse([]byte(`
-backends:
-  default: jev
-  writer: words
-  jev: {kind: jev}
-  words: {kind: anthropic, model: test-model}
-  local: {kind: openai, model: llama3}
+	f, err := ParseWithProject([]byte(`
 nodes:
   draft:
     action: llm
@@ -20,7 +19,7 @@ nodes:
   other:
     action: llm
     prompt: again
-    backend: local
+    model: local
     then: post
   post:
     action: http
@@ -33,6 +32,13 @@ nodes:
   result:
     action: output
     set: {action: posted, severity: "{{sev}}", score: 3, ok: true}
+`), []byte(`
+default: jev
+writer: words
+models:
+  jev:   https://api.typesafe.ai/v1/systemone
+  words: {url: https://api.anthropic.com/v1/messages, model: test-model}
+  local: {url: http://localhost:11434/v1/chat/completions, model: llama3}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -75,5 +81,78 @@ func TestParseActionErrors(t *testing.T) {
 		if _, err := Parse([]byte(src)); err == nil {
 			t.Errorf("%s: expected error", name)
 		}
+	}
+}
+
+func TestProjectModelsFromURLs(t *testing.T) {
+	p, err := ParseProject([]byte(`
+default: jev
+models:
+  jev:     {url: https://api.typesafe.ai/v1/systemone, key: tsk-1}
+  laya:    http://localhost:8000/v1/systemone
+  runware: {url: https://api.runware.ai/v1/decisions, key: rw, model: "runware:laya@1"}
+  claude:  {url: https://api.anthropic.com/v1/messages, key: sk, model: claude-opus-5-5}
+  llama:   {url: http://localhost:11434/v1/chat/completions, model: llama3.2}
+  azure:   {url: https://team.openai.azure.com/openai/v1/chat/completions, key: az, model: gpt-5}
+  nova:    {url: https://bedrock-runtime.us-east-1.amazonaws.com, model: amazon.nova-pro-v1:0}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"jev": "jev", "laya": "jev", "runware": "jev", "claude": "anthropic",
+		"llama": "openai", "azure": "openai", "nova": "bedrock", "mock": "mock"}
+	for name, kind := range want {
+		if got := p.Models[name].Kind; got != kind {
+			t.Errorf("%s: kind %q, want %q", name, got, kind)
+		}
+	}
+	if o := p.Models["jev"].Options; o["api_key"] != "tsk-1" || o["url"] != "https://api.typesafe.ai/v1/systemone" {
+		t.Errorf("jev options = %v", o)
+	}
+	if o := p.Models["claude"].Options; o["base_url"] != "https://api.anthropic.com/" {
+		t.Errorf("claude base_url = %v", o["base_url"])
+	}
+	if o := p.Models["azure"].Options; o["key_header"] != "api-key" || o["endpoint"] == nil {
+		t.Errorf("azure options = %v", o)
+	}
+	if o := p.Models["nova"].Options; o["region"] != "us-east-1" {
+		t.Errorf("nova region = %v", o["region"])
+	}
+	if p.Default != "jev" || p.Order[len(p.Order)-1] != "mock" {
+		t.Errorf("default %q, order %v", p.Default, p.Order)
+	}
+
+	t.Setenv("HUNCH_TEST_KEY", "from-env")
+	p, err = ParseProject([]byte("models: {j: {url: http://x/v1/systemone, key: $HUNCH_TEST_KEY}}"))
+	if err != nil || p.Models["j"].Options["api_key"] != "from-env" {
+		t.Errorf("$ key: %v %v", err, p.Models["j"].Options)
+	}
+	for src, want := range map[string]string{
+		"models: {x: http://localhost:11434}":                         "can't tell what http://localhost:11434 speaks",
+		"models: {x: {key: k}}":                                       "needs a url",
+		"models: {j: {url: http://x/v1/systemone, key: $NOPE_UNSET}}": "$NOPE_UNSET is not set",
+		"default: nope\nmodels: {}":                                   "not one of the models",
+	} {
+		if _, err := ParseProject([]byte(src)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", src, err, want)
+		}
+	}
+	if _, err := Parse([]byte("backends: {m: {kind: mock}}\nnodes: {a: {action: log, message: m}}")); err == nil || !strings.Contains(err.Error(), "hunch.yaml") {
+		t.Errorf("backends in a flow: %v", err)
+	}
+}
+
+func TestFindProjectWalksUp(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, ProjectFile), []byte("models: {laya: http://localhost:8000/v1/systemone}"), 0o644)
+	sub := filepath.Join(root, "flows", "deep")
+	os.MkdirAll(sub, 0o755)
+	os.WriteFile(filepath.Join(sub, "f.yaml"), []byte("nodes: {a: {bool: q, then: {_: b}}, b: {action: log, message: m}}"), 0o644)
+	f, err := Load(filepath.Join(sub, "f.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Project == nil || f.DefaultBackend != "laya" || f.Backends["laya"].Kind != "jev" {
+		t.Errorf("project = %+v", f.Project)
 	}
 }

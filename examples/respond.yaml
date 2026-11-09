@@ -3,22 +3,13 @@
 # a person. Sending is itself a decision in the flow.
 #
 #   hunch tui examples/respond.yaml                   # dry run: nothing is sent
-#   hunch test examples/respond.yaml                  # Jev decides, mock writes
+#   hunch test examples/respond.yaml
 #   hunch run examples/respond.yaml --case password-reset --dry-run --json
 #
-# Swap models by changing `default` (who decides) and `writer` (who writes),
-# or per run with --backend and --writer:
-#   hunch run examples/respond.yaml --case outage --backend jev --writer ollama --dry-run
+# hunch.yaml says which model decides (default) and which writes (writer);
+# change them per run with --model and --writer, or b in the TUI:
+#   hunch run examples/respond.yaml --case outage --model jev --writer ollama --dry-run
 name: first-response
-
-backends:
-  default: jev
-  writer: mock
-  mock: {kind: mock, seed: demo}
-  jev: {kind: jev, provider: typesafe}
-  laya: {kind: jev, provider: laya}       # --backend laya: Laya on this machine (laya-serve)
-  bedrock: {kind: bedrock, model: amazon.nova-pro-v1:0, region: us-east-1}
-  ollama: {kind: openai, base_url: "http://localhost:11434/v1", model: qwen2.5:1.5b}
 
 inputs:
   channel:

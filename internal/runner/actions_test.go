@@ -18,7 +18,7 @@ import (
 
 func runFlow(t *testing.T, src string, state map[string]any, dry bool) (*Result, error) {
 	t.Helper()
-	f, err := flow.Parse([]byte(src))
+	f, err := parseFlow(src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,12 +35,13 @@ func runFlow(t *testing.T, src string, state map[string]any, dry bool) (*Result,
 
 func TestLLMAndOutput(t *testing.T) {
 	res, err := runFlow(t, `
-backends: {m: {kind: mock, answers: {ok: yes}}}
 nodes:
   draft: {action: llm, prompt: "Reply to {{who}}", then: ok}
   ok: {bool: "Good enough? {{draft.text}}", then: {yes: send, no: hold}}
   send: {action: output, set: {action: send, text: "{{draft.text}}", n: "{{count}}", fixed: 2}}
   hold: {action: output, set: {action: hold}}
+---
+models: {m: {url: mock, answers: {ok: yes}}}
 `, map[string]any{"who": "ann", "count": 3.0}, false)
 	if err != nil {
 		t.Fatal(err)
@@ -59,8 +60,9 @@ nodes:
 
 func TestLLMNeedsAWriter(t *testing.T) {
 	_, err := runFlow(t, `
-backends: {j: {kind: jev}}
 nodes: {draft: {action: llm, prompt: hi}}
+---
+models: {j: https://api.typesafe.ai/v1/systemone}
 `, nil, false)
 	if err == nil || !strings.Contains(err.Error(), "can't write text") {
 		t.Errorf("err = %v", err)
@@ -183,7 +185,6 @@ func TestOutputsAndTemplatedCriteria(t *testing.T) {
 	res, err := runFlow(t, `
 state:
   sizes: {big: "Over a kilogram", small: "Fits in an envelope"}
-backends: {m: {kind: mock, answers: {a: small, b: small}}}
 nodes:
   scope: {switch: "{{sev}}", then: {x: a, _: b}}
   a:
@@ -194,6 +195,8 @@ nodes:
   set_a: {action: output, set: {new: "{{a.answer}}"}, then: explain}
   set_b: {action: output, set: {new: "{{b.answer}}"}, then: explain}
   explain: {action: log, message: "packing as {{outputs.new}}"}
+---
+models: {m: {url: mock, answers: {a: small, b: small}}}
 `, map[string]any{"sev": "x"}, false)
 	if err != nil {
 		t.Fatal(err)

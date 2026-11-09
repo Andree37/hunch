@@ -13,9 +13,17 @@ does the work at the end (call an API, run a command, write a reply).
 go install github.com/Andree37/hunch/cmd/hunch@latest
 ```
 
-The examples ask Jev for their answers, so put `TYPESAFE_API_KEY=...` in a
-`.env` file first (see [Models](#4-use-a-real-model)). `--backend mock` runs
-them offline, but mock makes its answers up, so their tests fail on it.
+Then say which models you use in a `hunch.yaml` in your project folder
+(copy [`hunch.example.yaml`](hunch.example.yaml); see
+[Models](#4-pick-your-models)). The examples ask Jev, so the smallest one is:
+
+```yaml
+models:
+  jev: {url: https://api.typesafe.ai/v1/systemone, key: tsk-...}
+```
+
+`--model mock` runs a flow offline, but mock makes its answers up, so tests
+fail on it.
 
 ## How it works
 
@@ -38,11 +46,6 @@ a reply, and what kind:
 
 ```yaml
 name: hello
-
-backends:
-  default: jev
-  jev: {kind: jev, provider: typesafe}  # needs TYPESAFE_API_KEY
-  mock: {kind: mock, seed: demo}        # --backend mock: offline, made-up answers
 
 nodes:
   worth_it:
@@ -91,25 +94,39 @@ expect:
 hunch test examples/hello.yaml
 ```
 
-Run them after changing a question, or with another `--backend`, to see what
+Run them after changing a question, or with another `--model`, to see what
 got better or worse.
 
-### 4. Use a real model
+### 4. Pick your models
 
-Backends are declared in the flow and picked per run with `--backend`
-(who decides) and `--writer` (who writes text for `llm` nodes).
+Flows don't name their models; `hunch.yaml`, in the project folder (or any
+folder above the flow), lists them once for every flow:
 
-| `kind` | What | Key |
+```yaml
+default: jev       # decides, unless --model or b in the TUI says otherwise
+writer: claude     # writes text for llm nodes
+
+models:
+  jev:    {url: https://api.typesafe.ai/v1/systemone, key: tsk-...}
+  laya:   http://localhost:8000/v1/systemone
+  claude: {url: https://api.anthropic.com/v1/messages, key: sk-ant-..., model: claude-opus-5-5}
+  llama:  {url: http://localhost:11434/v1/chat/completions, model: llama3.2}
+```
+
+A model is the URL of its endpoint, plus a `key` and a `model` name where
+the server wants them. The URL's path says how to talk to it:
+
+| Endpoint | Speaks | For example |
 |---|---|---|
-| `mock` | Offline, deterministic. `answers: {node: value}` forces answers. | none |
-| `jev` | TypeSafe's Jev, with calibrated confidence. Best for routing on `unsure`. | `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` |
-| `jev` with `provider: laya` | Convai's Laya, a small open decision model, run on your machine by `laya-serve`. | none |
-| `openai` | Any OpenAI-compatible server: OpenAI, Ollama, OpenRouter, vLLM, LM Studio. | `OPENAI_API_KEY` |
-| `anthropic` | The Anthropic API. | `ANTHROPIC_API_KEY` |
-| `bedrock` | Amazon Bedrock. | AWS credentials |
+| `.../v1/systemone`, `.../decisions` | decision models, with calibrated confidence | Jev (TypeSafe, OpenRouter, Runware), Laya (`laya-serve` on your machine or a server) |
+| `.../chat/completions` | OpenAI-style chat | OpenAI, Ollama, OpenRouter, Groq, vLLM, Azure OpenAI |
+| `.../v1/messages` | Anthropic | Claude |
+| `https://bedrock-runtime.REGION.amazonaws.com` | Amazon Bedrock | your AWS login, no key |
 
-Keys go in `.env` (gitignored). Chat models report their own confidence, so
-check thresholds that depend on it against your test cases.
+`mock` is always there. `hunch.yaml` holds keys, so keep it out of git, or
+write `key: $SOME_VAR` to read one from the environment. Chat models report
+their own confidence, so check thresholds that depend on it against your
+tests.
 
 ### 5. Explore it in the TUI
 

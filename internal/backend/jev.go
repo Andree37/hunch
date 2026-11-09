@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"net/url"
 	"slices"
 	"strconv"
 	"time"
@@ -15,54 +15,53 @@ import (
 	"github.com/Andree37/hunch/internal/flow"
 )
 
-// Jev calls a decision model that speaks TypeSafe's Jev API: Jev through
-// OpenRouter's Decisions API or TypeSafe's own API, or Convai's Laya served
-// on this machine by laya-serve (pip install "laya[serve]"). All take the
-// same request body. Options:
+// Jev calls a decision model that speaks TypeSafe's Jev API: Jev itself
+// (TypeSafe, OpenRouter, Runware...) or Convai's Laya served by laya-serve.
+// All take the same request body. Options:
 //
-//	provider:       openrouter (default), typesafe, or laya (local, no key)
-//	model:          defaults per provider
-//	api_key_env:    env var holding the key (OPENROUTER_API_KEY / TYPESAFE_API_KEY)
-//	url:            override the endpoint
-//	price_per_mtok: USD per million input tokens, used to estimate cost when
-//	                the provider doesn't report it (default 0.042)
+//	url:            the endpoint, e.g. https://api.typesafe.ai/v1/systemone
+//	model:          sent as is; defaults to Jev's for TypeSafe and OpenRouter
+//	api_key:        sent as a bearer token when set
+//	price_per_mtok: USD per million input tokens, to estimate cost when the
+//	                server doesn't report it (default 0.042 for Jev's hosts, else 0)
 //	timeout:        seconds per request (default 30)
 //	max_retries:    retries on 429, 529, 5xx and network errors (default 3)
 type Jev struct {
 	name        string
 	url         string
 	model       string
-	keyEnv      string
+	key         string
 	pricePerTok float64
 	maxRetries  int
-	keyOptional bool // a local server that may not check keys
 	client      *http.Client
 	backoff     time.Duration
 }
 
-var jevProviders = map[string]struct{ url, model, keyEnv string }{
-	"openrouter": {"https://openrouter.ai/api/alpha/decisions", "typesafe/jev-1.13", "OPENROUTER_API_KEY"},
-	"typesafe":   {"https://api.typesafe.ai/v1/systemone", "jev-latest", "TYPESAFE_API_KEY"},
-	// laya-serve's default address; the key is only needed if the server
-	// was started with LAYA_API_KEY.
-	"laya": {"http://localhost:8000/v1/systemone", "convaiinnovations/laya", "LAYA_API_KEY"},
+// jevHosts are where Jev itself is served, with its model id there.
+var jevHosts = map[string]string{
+	"api.typesafe.ai": "jev-latest",
+	"openrouter.ai":   "typesafe/jev-1.13",
 }
 
 func NewJev(cfg flow.BackendConfig) (*Jev, error) {
 	o := cfg.Options
-	provider := optString(o, "provider", "openrouter")
-	p, ok := jevProviders[provider]
-	if !ok {
-		return nil, fmt.Errorf("backend %q: unknown provider %q (want openrouter, typesafe or laya)", cfg.Name, provider)
+	endpoint := optString(o, "url", "")
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return nil, fmt.Errorf("model %q: url %q is not an endpoint", cfg.Name, endpoint)
+	}
+	jevModel, isJev := jevHosts[u.Hostname()]
+	price := 0.0
+	if isJev {
+		price = 0.042
 	}
 	return &Jev{
 		name:        cfg.Name,
-		url:         optString(o, "url", p.url),
-		model:       optString(o, "model", p.model),
-		keyEnv:      optString(o, "api_key_env", p.keyEnv),
-		pricePerTok: optFloat(o, "price_per_mtok", 0.042) / 1e6,
+		url:         endpoint,
+		model:       optString(o, "model", jevModel),
+		key:         optString(o, "api_key", ""),
+		pricePerTok: optFloat(o, "price_per_mtok", price) / 1e6,
 		maxRetries:  int(optFloat(o, "max_retries", 3)),
-		keyOptional: provider == "laya",
 		client:      &http.Client{Timeout: optSeconds(o, "timeout", 30)},
 		backoff:     500 * time.Millisecond,
 	}, nil
@@ -73,7 +72,7 @@ func (j *Jev) Name() string { return j.name }
 func (j *Jev) Caps() Caps { return Caps{MultiQuestion: true, Calibrated: true, CostReporting: true} }
 
 type jevRequest struct {
-	Model     string                 `json:"model"`
+	Model     string                 `json:"model,omitempty"`
 	State     any                    `json:"state"`
 	Questions map[string]jevQuestion `json:"questions"`
 }
@@ -106,10 +105,7 @@ type jevAnswer struct {
 }
 
 func (j *Jev) Decide(ctx context.Context, state map[string]any, qs []flow.Question) (Response, error) {
-	key := os.Getenv(j.keyEnv)
-	if key == "" && !j.keyOptional {
-		return Response{}, fmt.Errorf("backend %s: $%s is not set", j.name, j.keyEnv)
-	}
+	key := j.key
 
 	req := jevRequest{Model: j.model, State: state, Questions: map[string]jevQuestion{}}
 	for _, q := range qs {

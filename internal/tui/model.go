@@ -129,6 +129,8 @@ type Model struct {
 	gridID     int
 	gridCursor int
 
+	picking     bool // the model list (b) covers the screen
+	modelCursor int
 	compare     *comparison // two recorded runs side by side
 	compareMark *trace.Run  // the first run picked with c
 
@@ -168,8 +170,11 @@ func New(path string, state map[string]any, backendName string, fromCase bool) (
 	if m.backend == "" {
 		m.backend = m.flow.DefaultBackend
 	}
+	if m.flow.Project == nil && backendName != "mock" {
+		return nil, errors.New(flow.ProjectHelp(path))
+	}
 	if _, ok := m.flow.Backends[m.backend]; !ok {
-		return nil, fmt.Errorf("backend %q is not defined in %s", m.backend, path)
+		return nil, fmt.Errorf("model %q is not in %s (it has %s)", m.backend, m.flow.Project.Path, strings.Join(m.flow.Project.Order, ", "))
 	}
 
 	m.keyEditor = textinput.New()
@@ -459,6 +464,10 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateCompare(msg.String())
 		return m, nil
 	}
+	if m.picking {
+		m.updateModels(msg.String())
+		return m, nil
+	}
 	if m.detail {
 		switch msg.String() {
 		case "esc", "enter", "q", "backspace":
@@ -614,10 +623,7 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.flash = "dry run: shell and http writes are only recorded"
 		}
 	case "b":
-		names := slices.Sorted(maps.Keys(m.flow.Backends))
-		i := slices.Index(names, m.backend)
-		m.backend = names[(i+1)%len(names)]
-		m.flash = "backend: " + m.backend
+		m.openModels()
 	case "enter", "e":
 		switch {
 		case m.focus == focusFlow && m.flowView == viewGrid:

@@ -24,7 +24,8 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# models and their keys (see hunch.yaml in docs/reference.md)
+/hunch.yaml
 .env
 
 # Editor/IDE
@@ -34,5 +35,5 @@ go.work.sum
 # local demo output
 .demo/
 
-# recorded runs (hunch serve/run record next to each flow)
+# recorded runs (hunch run and the TUI record next to each flow)
 *.runs/

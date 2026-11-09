@@ -1,0 +1,11 @@
+# Copy to hunch.yaml and fill in the keys. hunch.yaml is gitignored.
+# A model is the URL of its endpoint; the path says which API it speaks.
+
+default: jev       # decides, unless --model or b in the TUI says otherwise
+writer: ollama     # writes text for llm nodes
+
+models:
+  jev:    {url: https://api.typesafe.ai/v1/systemone, key: tsk-...}   # or https://openrouter.ai/api/alpha/decisions
+  laya:   http://localhost:8000/v1/systemone                          # laya-serve on this machine
+  ollama: {url: http://localhost:11434/v1/chat/completions, model: "qwen2.5:1.5b"}
+  # claude: {url: https://api.anthropic.com/v1/messages, key: sk-ant-..., model: claude-opus-5-5}

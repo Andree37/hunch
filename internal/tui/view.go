@@ -59,6 +59,8 @@ func (m *Model) View() string {
 		body = m.helpView(bodyH)
 	case m.compare != nil:
 		body = m.compareView(bodyH)
+	case m.picking:
+		body = m.modelsView(bodyH)
 	case m.detail:
 		body = pane(m.stepTitle(), m.scrolledStepLines(m.width-4, bodyH-3), m.width, bodyH, true)
 	case m.editing == editValue:
@@ -243,6 +245,8 @@ func (m *Model) footerBar() string {
 	switch {
 	case m.help:
 		keys = "any key closes"
+	case m.picking:
+		keys = "j/k choose · enter decide with it · w write with it · esc back"
 	case m.detail || m.compare != nil:
 		keys = "j/k scroll · esc back"
 	case m.editing == editKey || m.editing == editCaseName || m.editing == editRunsPath:
@@ -314,7 +318,7 @@ func (m *Model) helpView(h int) string {
 			{"w", "in the grid: write the thresholds you're trying into the flow"},
 			{"A", "ask the model only what the ? tests need at the thresholds being tried"}, {"s", "run one step at a time"}, {"x", "stop"},
 			{"m", "switch between the run and the map of the flow"},
-			{"b", "switch backend"}, {"L", "live or dry run: dry runs don't run shell or send http writes"},
+			{"b", "pick the model that decides (or writes), from hunch.yaml"}, {"L", "live or dry run: dry runs don't run shell or send http writes"},
 		}},
 		{"Move", [][2]string{
 			{"1 2 3 4", "run · tests · step · input"}, {"tab", "next pane"},

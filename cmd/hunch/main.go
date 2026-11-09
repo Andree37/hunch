@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,9 +27,14 @@ import (
 const usage = `hunch: decision flows with typed, calibrated answers
 
 usage:
-  hunch tui [FLOW] [--backend name] [--writer name] [--set key=value]... [--state file.json] [--runs file.jsonl]
-  hunch test FLOW [--backend name] [--writer name] [--live] [name...]
-  hunch run FLOW [--backend name] [--writer name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl|dir] [--json] [--dry-run]
+  hunch tui [FLOW] [--model name] [--writer name] [--set key=value]... [--state file.json] [--runs file.jsonl]
+  hunch test FLOW [--model name] [--writer name] [--live] [name...]
+  hunch run FLOW [--model name] [--writer name] [--case name] [--set key=value]... [--state file.json] [--trace file.jsonl|dir] [--json] [--dry-run]
+
+Models come from hunch.yaml, in the flow's folder or one above it:
+  default: jev
+  models:
+    jev: {url: https://api.typesafe.ai/v1/systemone, key: tsk-...}
 
 Every command checks the flow first and stops on errors.
 
@@ -42,10 +48,6 @@ func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
-	}
-	if err := loadDotenv(".env"); err != nil {
-		fmt.Fprintln(os.Stderr, "hunch:", err)
-		os.Exit(1)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -78,8 +80,8 @@ func cmdRun(ctx context.Context, args []string) error {
 	traceFile := fs.String("trace", "", "where to record the run: a .jsonl file, a directory, or off (default: the flow's runs location)")
 	asJSON := fs.Bool("json", false, "print final state as JSON on stdout; progress goes to stderr")
 	maxVisits := fs.Int("max-visits", 5, "max times a single node may run")
-	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
-	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
+	backendName := fs.String("model", "", "decide with this model from hunch.yaml instead of its default")
+	writerName := fs.String("writer", "", "write text for llm nodes with this model from hunch.yaml")
 	caseName := fs.String("case", "", "take input from this test case (--set still overrides)")
 	dryRun := fs.Bool("dry-run", false, "don't run shell commands or send http writes; record them instead")
 	path, err := parseArgs(fs, args)
@@ -174,8 +176,8 @@ func cmdTUI(args []string) error {
 	var sets multiFlag
 	fs.Var(&sets, "set", "set a state field, key=value (repeatable)")
 	stateFile := fs.String("state", "", "JSON file with initial state")
-	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
-	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
+	backendName := fs.String("model", "", "decide with this model from hunch.yaml instead of its default")
+	writerName := fs.String("writer", "", "write text for llm nodes with this model from hunch.yaml")
 	runsFile := fs.String("runs", "", "read recorded runs from here instead of the flow's runs location: a .jsonl file or a directory")
 	paths, err := parseOptionalArg(fs, args)
 	if err != nil {
@@ -234,8 +236,8 @@ func parseOptionalArg(fs *flag.FlagSet, args []string) ([]string, error) {
 
 func cmdTest(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("test", flag.ExitOnError)
-	backendName := fs.String("backend", "", "use this backend instead of the flow's default")
-	writerName := fs.String("writer", "", "use this backend for llm nodes instead of the flow's writer")
+	backendName := fs.String("model", "", "decide with this model from hunch.yaml instead of its default")
+	writerName := fs.String("writer", "", "write text for llm nodes with this model from hunch.yaml")
 	live := fs.Bool("live", false, "run shell commands and send http writes for real (default: record them only)")
 	var paths []string
 	for {
@@ -315,7 +317,7 @@ func cmdTest(ctx context.Context, args []string) error {
 			}
 		}
 	}
-	fmt.Printf("\n%d/%d passed · backend %s · $%.6f\n", ran-failed, ran, f.DefaultBackend, cost)
+	fmt.Printf("\n%d/%d passed · model %s · $%.6f\n", ran-failed, ran, f.DefaultBackend, cost)
 	if failed > 0 {
 		return fmt.Errorf("%d failed", failed)
 	}
@@ -344,12 +346,18 @@ func missingInputs(f *flow.Flow, state map[string]any) []string {
 	return out
 }
 
-// pickBackends applies --backend (who decides) and --writer (who writes for
+// pickBackends applies --model (who decides) and --writer (who writes for
 // llm nodes) to the flow.
 func pickBackends(f *flow.Flow, path, decider, writer string) error {
+	if f.Project == nil && decider != "mock" {
+		return errors.New(flow.ProjectHelp(path))
+	}
 	for _, name := range []string{decider, writer} {
 		if _, ok := f.Backends[name]; name != "" && !ok {
-			return fmt.Errorf("backend %q is not defined in %s", name, path)
+			if f.Project == nil {
+				return errors.New(flow.ProjectHelp(path))
+			}
+			return fmt.Errorf("model %q is not in %s (it has %s)", name, f.Project.Path, strings.Join(f.Project.Order, ", "))
 		}
 	}
 	if decider != "" {

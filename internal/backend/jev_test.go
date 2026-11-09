@@ -47,12 +47,11 @@ var tutorialQuestions = []flow.Question{
 
 func newTestJev(t *testing.T, url string, opts map[string]any) *Jev {
 	t.Helper()
-	t.Setenv("HUNCH_TEST_KEY", "sk-test")
 	if opts == nil {
 		opts = map[string]any{}
 	}
 	opts["url"] = url
-	opts["api_key_env"] = "HUNCH_TEST_KEY"
+	opts["api_key"] = "sk-test"
 	j, err := NewJev(flow.BackendConfig{Name: "jev", Kind: "jev", Options: opts})
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +74,7 @@ func TestJevRequestAndResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	j := newTestJev(t, srv.URL, nil)
+	j := newTestJev(t, srv.URL, map[string]any{"model": "typesafe/jev-1.13"})
 	resp, err := j.Decide(context.Background(), map[string]any{"ticket": "blank checkout"}, tutorialQuestions)
 	if err != nil {
 		t.Fatal(err)
@@ -189,17 +188,6 @@ func TestJevBadAnswers(t *testing.T) {
 	}
 }
 
-func TestJevMissingKey(t *testing.T) {
-	j, err := NewJev(flow.BackendConfig{Name: "jev", Options: map[string]any{"api_key_env": "HUNCH_UNSET_KEY_FOR_TEST"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = j.Decide(context.Background(), nil, tutorialQuestions[:1])
-	if err == nil || !strings.Contains(err.Error(), "$HUNCH_UNSET_KEY_FOR_TEST is not set") {
-		t.Errorf("err = %v", err)
-	}
-}
-
 // Laya served locally by laya-serve: same API, no key, extra fields ignored.
 func TestLayaLocal(t *testing.T) {
 	var auth string
@@ -217,9 +205,7 @@ func TestLayaLocal(t *testing.T) {
 			"usage": {"input_tokens": 83, "output_tokens": 0}, "routing": {"model": "english"}}`)
 	}))
 	defer srv.Close()
-	t.Setenv("LAYA_API_KEY", "")
-
-	b, err := New(flow.BackendConfig{Name: "laya", Kind: "jev", Options: map[string]any{"provider": "laya", "url": srv.URL + "/v1/systemone"}})
+	b, err := New(flow.BackendConfig{Name: "laya", Kind: "jev", Options: map[string]any{"url": srv.URL + "/v1/systemone", "model": "convaiinnovations/laya"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,5 +237,21 @@ func TestLayaLocal(t *testing.T) {
 	}
 	if d[2].Answer != true || d[2].Confidence < 0.9 {
 		t.Errorf("bool = %+v", d[2])
+	}
+}
+
+func TestJevDefaultsByHost(t *testing.T) {
+	for url, want := range map[string]string{
+		"https://api.typesafe.ai/v1/systemone":      "jev-latest",
+		"https://openrouter.ai/api/alpha/decisions": "typesafe/jev-1.13",
+		"http://localhost:8000/v1/systemone":        "",
+	} {
+		j, err := NewJev(flow.BackendConfig{Name: "j", Options: map[string]any{"url": url}})
+		if err != nil || j.model != want {
+			t.Errorf("%s: model %q, %v", url, j.model, err)
+		}
+		if (j.pricePerTok > 0) != (want != "") {
+			t.Errorf("%s: price %v", url, j.pricePerTok)
+		}
 	}
 }

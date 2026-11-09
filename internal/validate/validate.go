@@ -51,9 +51,6 @@ func Flow(f *flow.Flow) []Issue {
 	if f.Node(f.Start) == nil {
 		v.errorf("", "start node %q does not exist", f.Start)
 	}
-	if _, ok := f.Backends[f.DefaultBackend]; f.DefaultBackend != "" && !ok {
-		v.errorf("", "default backend %q is not defined", f.DefaultBackend)
-	}
 	for _, n := range f.Nodes {
 		v.node(n)
 	}
@@ -87,9 +84,9 @@ func (v *validator) node(n *flow.Node) {
 	if n.Kind.IsDecision() {
 		name := v.f.BackendFor(n)
 		if name == "" {
-			v.errorf(n.ID, "no backend (set backends.default or backend on the node)")
+			v.errorf(n.ID, "no model (set default: in hunch.yaml, or model: on the node)")
 		} else if cfg, ok := v.f.Backends[name]; !ok {
-			v.errorf(n.ID, "backend %q is not defined", name)
+			v.errorf(n.ID, "model %q is not in hunch.yaml", name)
 		} else if _, unsure := n.Then.Get(flow.Unsure); backend.SelfReported(cfg.Kind) && (unsure || n.Threshold > 0) {
 			v.warnf(n.ID, "routes on confidence, but %s (%s) reports its own confidence; it isn't calibrated like Jev's, so test the threshold", name, cfg.Kind)
 		}
@@ -101,11 +98,11 @@ func (v *validator) node(n *flow.Node) {
 		cfg, ok := v.f.Backends[name]
 		switch {
 		case name == "":
-			v.errorf(n.ID, "no backend to write with (set backends.writer or backend on the node)")
+			v.errorf(n.ID, "no model to write with (set writer: in hunch.yaml, or model: on the node)")
 		case !ok:
-			v.errorf(n.ID, "backend %q is not defined", name)
+			v.errorf(n.ID, "model %q is not in hunch.yaml", name)
 		case !backend.CanWrite(cfg.Kind):
-			v.errorf(n.ID, "backend %q (%s) can't write text; use openai, anthropic, bedrock or mock", name, cfg.Kind)
+			v.errorf(n.ID, "model %q is a decision model and can't write text; set writer: in hunch.yaml to a chat model", name)
 		}
 	}
 

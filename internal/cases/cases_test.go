@@ -161,8 +161,7 @@ http:
 }
 
 func TestFromRunRoundTrip(t *testing.T) {
-	f, err := flow.Parse([]byte(`
-backends: {m: {kind: mock, answers: {gate: yes, kind: b, multi.n: 4, multi.ok: no}}}
+	f, err := flow.ParseWithProject([]byte(`
 nodes:
   fetch: {action: http, method: GET, url: "{{base}}", then: gate}
   gate: {bool: "q?", then: {yes: kind, no: done}}
@@ -173,7 +172,7 @@ nodes:
       ok: {bool: "ok?"}
     then: done
   done: {action: output, set: {action: filed, kind: "{{kind.answer}}"}}
-`))
+`), []byte(`models: {m: {url: mock, answers: {gate: yes, kind: b, multi.n: 4, multi.ok: no}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}

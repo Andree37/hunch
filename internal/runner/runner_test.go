@@ -11,14 +11,6 @@ import (
 )
 
 const inbox = `
-backends:
-  mock:
-    kind: mock
-    answers:
-      gate: yes
-      intent: meeting
-      tone.urgency: 5
-      tone.formal: no
 nodes:
   gate: {bool: "reply?", then: {yes: intent, no: archive}}
   intent:
@@ -37,11 +29,26 @@ nodes:
     action: shell
     run: printf %s {{intent.answer}}
   archive: {action: log, message: archived}
+---
+models:
+  mock:
+    answers:
+      gate: yes
+      intent: meeting
+      tone.urgency: 5
+      tone.formal: no
 `
+
+// parseFlow reads a test flow: the flow, then after a --- line the models,
+// as a hunch.yaml would give them.
+func parseFlow(src string) (*flow.Flow, error) {
+	flowSrc, models, _ := strings.Cut(src, "\n---\n")
+	return flow.ParseWithProject([]byte(flowSrc), []byte(models))
+}
 
 func run(t *testing.T, src string, state map[string]any) *Result {
 	t.Helper()
-	f, err := flow.Parse([]byte(src))
+	f, err := parseFlow(src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,11 +105,12 @@ func TestShellValuesAreEscaped(t *testing.T) {
 func TestUnsureRoute(t *testing.T) {
 	// A choice forced at 0.9 confidence is unsure under a 0.95 threshold.
 	src := `
-backends: {m: {kind: mock, answers: {c: b}}}
 nodes:
   c: {choice: q, options: [a, b], threshold: 0.95, then: {b: done, unsure: ask}}
   done: {action: log, message: done}
   ask: {action: log, message: ask}
+---
+models: {m: {url: mock, answers: {c: b}}}
 `
 	res := run(t, src, nil)
 	if !slices.Equal(res.Path, []string{"c", "ask"}) {
@@ -128,7 +136,7 @@ type oneAtATime struct{ backend.Backend }
 func (oneAtATime) Caps() backend.Caps { return backend.Caps{} }
 
 func TestFanOutForSingleQuestionBackends(t *testing.T) {
-	f, _ := flow.Parse([]byte(inbox))
+	f, _ := parseFlow(inbox)
 	m, _ := backend.New(f.Backends["mock"])
 	res, err := Run(context.Background(), f, nil, Options{Backends: map[string]backend.Backend{"mock": oneAtATime{m}}})
 	if err != nil {
@@ -153,7 +161,7 @@ nodes:
 }
 
 func TestBeforeCanPauseAndStop(t *testing.T) {
-	f, err := flow.Parse([]byte(inbox))
+	f, err := parseFlow(inbox)
 	if err != nil {
 		t.Fatal(err)
 	}
