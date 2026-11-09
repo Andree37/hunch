@@ -1093,3 +1093,10 @@ func TestCloseARun(t *testing.T) {
 		t.Errorf("enter on the open run should close it: replaying=%v inputs=%v", m.replaying(), m.inputs)
 	}
 }
+
+func TestTextWithAColonStaysText(t *testing.T) {
+	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "carol", "message": "Note: the launch moved"}, "mock", false)
+	if got := m.state()["message"]; got != "Note: the launch moved" {
+		t.Errorf("message = %#v, want the text as typed", got)
+	}
+}

@@ -63,6 +63,9 @@ func TestInputParseAndCheck(t *testing.T) {
 		{choice, "a", "a"}, {boolean, "yes", true}, {boolean, "False", false},
 		{num, "3.5", 3.5}, {text, "42", "42"}, {text, "true", "true"},
 		{loose, "42", 42}, {loose, "hello", "hello"},
+		// Sentences stay sentences even when YAML would read them otherwise.
+		{loose, "Note: the launch moved", "Note: the launch moved"},
+		{loose, "- milk", "- milk"}, {loose, "a: 1, b: 2", "a: 1, b: 2"},
 	}
 	for _, c := range ok {
 		got, err := c.s.Parse(c.in)
@@ -78,6 +81,12 @@ func TestInputParseAndCheck(t *testing.T) {
 		if _, err := c.s.Parse(c.in); err == nil {
 			t.Errorf("%s.Parse(%q): expected error", c.s.Name, c.in)
 		}
+	}
+	if v, _ := loose.Parse("[1, 2]"); len(v.([]any)) != 2 {
+		t.Errorf("[1, 2] = %#v, want a list", v)
+	}
+	if v, _ := loose.Parse("{a: 1}"); v.(map[string]any)["a"] != 1 {
+		t.Errorf("{a: 1} = %#v, want a map", v)
 	}
 	if choice.Check("z") == nil || boolean.Check("yes") == nil || num.Check(5) != nil || text.Check(3) == nil {
 		t.Error("Check disagrees")

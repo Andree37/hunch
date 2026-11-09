@@ -100,14 +100,26 @@ func (s InputSpec) Check(v any) error {
 	return nil
 }
 
+// guess reads typed text as a number, true/false, or a [list] or {map} in
+// brackets; anything else stays text. Only bracketed text can be a list or a
+// map, so a sentence like "Note: hi" or "- milk" stays a sentence.
 func guess(text string) any {
 	var v any
 	if err := yaml.Unmarshal([]byte(text), &v); err != nil || v == nil {
 		return text
 	}
+	trimmed := strings.TrimSpace(text)
 	switch v.(type) {
-	case bool, int, float64, []any, map[string]any:
+	case bool, int, float64:
 		return v
+	case []any:
+		if strings.HasPrefix(trimmed, "[") {
+			return v
+		}
+	case map[string]any:
+		if strings.HasPrefix(trimmed, "{") {
+			return v
+		}
 	}
 	return text
 }
