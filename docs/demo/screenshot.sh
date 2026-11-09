@@ -9,8 +9,15 @@ bin="$(mktemp -d)"
 go build -o "$bin/hunch" "$root/cmd/hunch"
 export PATH="$bin:$PATH"
 cd "$root"
-rm -rf examples/hello.runs
-trap 'rm -rf "$bin" examples/hello.runs' EXIT
+# Start from no recorded runs, and put yours back afterwards.
+saved="$bin/hello.runs"
+[ -e examples/hello.runs ] && mv examples/hello.runs "$saved"
+restore() {
+  rm -rf examples/hello.runs
+  [ -e "$saved" ] && mv "$saved" examples/hello.runs
+  rm -rf "$bin"
+}
+trap restore EXIT
 mkdir -p .demo/rec
 vhs "$here/screenshot.tape"
 png="tui-$(date +%F-%H%M).png"
