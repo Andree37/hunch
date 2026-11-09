@@ -248,6 +248,9 @@ hunch tui examples/hello.yaml                                         # lists an
 - `s` replays it one step at a time, exactly as it happened; `r` runs the same
   input again live, e.g. after changing the flow, to see if it now goes the
   way it should.
+- `c` marks a run; `c` on another compares the two side by side: the input
+  that differs, where their paths split, and each question's answer and
+  confidence in both, with the ones that differ marked. `esc` goes back.
 - `n` saves it as a test case: its input, the http replies it got (as fakes,
   so it runs offline) and every answer it gave as `expect:`. Fix the answers
   it got wrong and the test fails until the flow gets them right. `n` does the
@@ -434,7 +437,7 @@ The footer lists the keys that matter where you are; `?` lists them all.
 `r` run · `R` run every test · `g` back to all tests · `←`/`→` pick a question · `[`/`]` try its threshold · `w` keep thresholds · `A` ask what `?` tests need · `s` step one node · `x` stop · `m` run / map · `1-4` jump to pane ·
 `tab` next pane · `j/k` move · `enter` load / open / edit · `b` switch backend ·
 `L` live / dry run · `a`/`d` add / delete input · `w` save case · `n` save as
-new case · `t` tests / recorded runs · `o` runs from elsewhere · `esc` close a
+new case · `t` tests / recorded runs · `c` compare two runs · `o` runs from elsewhere · `esc` close a
 recorded run · `F` flow picker · `q` quit
 
 ## Commands

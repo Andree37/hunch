@@ -1319,3 +1319,43 @@ func TestGridScrollsToTheSelectedTest(t *testing.T) {
 		t.Errorf("the first test should have scrolled away:\n%s", screen)
 	}
 }
+
+func TestCompareTwoRecordedRuns(t *testing.T) {
+	runs := recordRuns(t,
+		map[string]any{"sender": "carol", "message": "hi"},
+		map[string]any{"sender": "boss", "message": "urgent"},
+	)
+	m, _ := New("testdata/inbox.yaml", nil, "mock", false)
+	m.SetRuns(runs)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 44})
+	m.Update(press("2"))
+	m.Update(press("c"))
+	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "◆ compare") || !strings.Contains(m.flash, "c on another run") {
+		t.Fatalf("c should mark the run:\n%s", screen)
+	}
+	m.Update(press("j"))
+	m.Update(press("c"))
+	if m.compare == nil {
+		t.Fatal("second c should compare")
+	}
+	screen := ansi.Strip(m.View())
+	for _, want := range []string{"Compare runs", "Input", "message A  hi", "message B  urgent", "worth_it", "ends at", "cost"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("compare missing %q:\n%s", want, screen)
+		}
+	}
+	// The older run is A.
+	if m.compare.a.Input["sender"] != "carol" {
+		t.Errorf("A = %v", m.compare.a.Input)
+	}
+	m.Update(press("esc"))
+	if m.compare != nil {
+		t.Error("esc should close it")
+	}
+
+	// A run against itself is all the same.
+	m.compare = &comparison{a: m.runs[0], b: m.runs[0]}
+	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "Same input") || !strings.Contains(screen, "Same path") || !strings.Contains(screen, "Every answer is the same.") {
+		t.Errorf("same run:\n%s", screen)
+	}
+}

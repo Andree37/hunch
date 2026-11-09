@@ -57,6 +57,8 @@ func (m *Model) View() string {
 	switch {
 	case m.help:
 		body = m.helpView(bodyH)
+	case m.compare != nil:
+		body = m.compareView(bodyH)
 	case m.detail:
 		body = pane(m.stepTitle(), m.scrolledStepLines(m.width-4, bodyH-3), m.width, bodyH, true)
 	case m.editing == editValue:
@@ -241,7 +243,7 @@ func (m *Model) footerBar() string {
 	switch {
 	case m.help:
 		keys = "any key closes"
-	case m.detail:
+	case m.detail || m.compare != nil:
 		keys = "j/k scroll · esc back"
 	case m.editing == editKey || m.editing == editCaseName || m.editing == editRunsPath:
 		keys = "enter ok · esc cancel"
@@ -267,6 +269,9 @@ func (m *Model) footerBar() string {
 		keys = "enter edit · a add · d delete · w save test · r run · ? keys"
 	case m.focus == focusTests:
 		keys = "r run this · s step through it · enter load · t tests/runs · ? keys"
+		if m.showRuns {
+			keys = "enter open · c compare two runs · n save as test · t tests/runs · ? keys"
+		}
 	case m.focus == focusNode:
 		keys = "j/k scroll · r run · ? keys"
 	default:
@@ -318,7 +323,7 @@ func (m *Model) helpView(h int) string {
 		{"Input and tests", [][2]string{
 			{"a", "add an input"}, {"d", "delete an input"},
 			{"w", "save the input to this test"}, {"n", "save it (or the run) as a new test"},
-			{"t", "show tests or recorded runs"}, {"o", "read runs from another folder or file"},
+			{"t", "show tests or recorded runs"}, {"c", "on a recorded run: mark it; c on another compares the two side by side"}, {"o", "read runs from another folder or file"},
 			{"esc", "close a recorded run"},
 		}},
 		{"Other", [][2]string{{"F", "back to the list of flows"}, {"?", "this help"}, {"q", "quit"}}},

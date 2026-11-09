@@ -129,6 +129,9 @@ type Model struct {
 	gridID     int
 	gridCursor int
 
+	compare     *comparison // two recorded runs side by side
+	compareMark *trace.Run  // the first run picked with c
+
 	help   bool // the key list covers the screen
 	detail bool // the selected step covers the screen
 
@@ -452,6 +455,10 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.compare != nil {
+		m.updateCompare(msg.String())
+		return m, nil
+	}
 	if m.detail {
 		switch msg.String() {
 		case "esc", "enter", "q", "backspace":
@@ -630,6 +637,10 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.focus == focusTests && !m.showRuns && len(m.cases) > 0:
 			m.replay = nil
 			m.useCase(m.caseCursor)
+		}
+	case "c":
+		if m.focus == focusTests {
+			m.markForCompare()
 		}
 	case "F":
 		return m, func() tea.Msg { return backToPickerMsg{} }

@@ -170,8 +170,8 @@ the TUI) does it for real. `hunch run` does it unless given `--dry-run`.
 
 Every run (from `hunch run` or the TUI) is recorded next to the flow, in
 `hello.runs/`. Open the flow in the TUI and press `2` to see them (`t`
-switches between runs and tests), `enter` to replay one, and `n` to save it
-as a test case. That's how real inputs turn into tests.
+switches between runs and tests), `enter` to replay one, `c` on two of them
+to compare them side by side, and `n` to save one as a test case. That's how real inputs turn into tests.
 
 ## Node types
 
