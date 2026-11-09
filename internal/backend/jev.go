@@ -57,7 +57,7 @@ func NewJev(cfg flow.BackendConfig) (*Jev, error) {
 		keyEnv:      optString(o, "api_key_env", p.keyEnv),
 		pricePerTok: optFloat(o, "price_per_mtok", 0.042) / 1e6,
 		maxRetries:  int(optFloat(o, "max_retries", 3)),
-		client:      &http.Client{Timeout: time.Duration(optFloat(o, "timeout", 30) * float64(time.Second))},
+		client:      &http.Client{Timeout: optSeconds(o, "timeout", 30)},
 		backoff:     500 * time.Millisecond,
 	}, nil
 }

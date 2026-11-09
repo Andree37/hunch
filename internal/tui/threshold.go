@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"net/http"
 	"sync"
 
 	"errors"
@@ -137,6 +138,16 @@ func rerouted(ctx context.Context, f *flow.Flow, base *gridRow, shift float64, r
 	maps.Copy(fakes, base.kase.HTTP)
 	res, err := runner.Run(ctx, f, maps.Clone(base.inputs), runner.Options{
 		Backends: backends, DryRun: true, Fake: fakes, ThresholdShift: shift,
+		// Trying a threshold never touches the network: a GET the grid
+		// didn't make waits for A, like a question.
+		Before: func(_ context.Context, id string) error {
+			n := f.Node(id)
+			_, faked := fakes[id]
+			if real == nil && !faked && n != nil && n.Kind == flow.Action && n.Action.Type == flow.ActHTTP && n.Action.Method == http.MethodGet {
+				return &notAskedError{id, id + " was never fetched"}
+			}
+			return nil
+		},
 		OnStart: func(node string) { row.path = append(row.path, node) },
 		OnEvent: func(ev runner.Event) {
 			row.events[ev.Node] = ev
@@ -147,7 +158,8 @@ func rerouted(ctx context.Context, f *flow.Flow, base *gridRow, shift float64, r
 	var na *notAskedError
 	switch {
 	case errors.As(err, &na):
-		if len(row.path) > 0 {
+		row.needs = na.node
+		if row.needs == "" && len(row.path) > 0 {
 			row.needs = row.path[len(row.path)-1]
 		}
 	case err != nil:
@@ -186,9 +198,11 @@ type replayBackend struct {
 	wrote map[string]string
 }
 
-type notAskedError struct{ what string }
+// notAskedError is a model call, or an http GET, a rerouted run would have
+// to make. node is where, when known.
+type notAskedError struct{ node, what string }
 
-func (e *notAskedError) Error() string { return "the model was never asked " + e.what }
+func (e *notAskedError) Error() string { return e.what }
 
 func (b *replayBackend) Name() string { return "replay" }
 
@@ -200,7 +214,7 @@ func (b *replayBackend) Decide(_ context.Context, _ map[string]any, qs []flow.Qu
 		d, ok := b.asked[q.ID]
 		if !ok {
 			node, _, _ := strings.Cut(q.ID, ".")
-			return resp, &notAskedError{node}
+			return resp, &notAskedError{node, "the model was never asked " + node}
 		}
 		resp.Decisions = append(resp.Decisions, d)
 	}
@@ -210,7 +224,7 @@ func (b *replayBackend) Decide(_ context.Context, _ map[string]any, qs []flow.Qu
 func (b *replayBackend) Write(_ context.Context, req backend.WriteRequest) (backend.WriteResponse, error) {
 	text, ok := b.wrote[req.Prompt]
 	if !ok {
-		return backend.WriteResponse{}, &notAskedError{"to write this"}
+		return backend.WriteResponse{}, &notAskedError{"", "the model was never asked to write this"}
 	}
 	return backend.WriteResponse{Text: text}, nil
 }
@@ -288,6 +302,8 @@ func (m *Model) askMissing() tea.Cmd {
 	}
 	shift := m.shift()
 	g.asking = true
+	ctx, cancel := context.WithCancel(context.Background())
+	g.askCancel = cancel
 	ch := make(chan tea.Msg, len(need)+1)
 	bases := make([]*gridRow, len(need))
 	for k, i := range need {
@@ -304,10 +320,14 @@ func (m *Model) askMissing() tea.Cmd {
 			sem <- struct{}{}
 			go func() {
 				defer func() { <-sem; wg.Done() }()
-				ch <- askRowMsg{id, i, rerouted(context.Background(), f, bases[k], shift, backends)}
+				row := rerouted(ctx, f, bases[k], shift, backends)
+				if ctx.Err() == nil {
+					ch <- askRowMsg{id, i, row}
+				}
 			}()
 		}
 		wg.Wait()
+		cancel()
 		ch <- askDoneMsg{id}
 	}()
 	next := func() tea.Msg {

@@ -141,8 +141,10 @@ nodes:
   unless given `--dry-run`.
 - **Secrets** go in `$VARS` in `url` and `headers`, read from the environment,
   so they never enter state or any model's prompt. Only `$VARS` written in
-  the flow are expanded: a `$NAME` inside an input or an answer stays as it is.
-  Refs in a URL are escaped.
+  the `url` or header itself are expanded: a `$NAME` that comes in through
+  a ref (an input, an answer, or a `state:` constant) stays as it is. Write
+  `url: "$API_BASE/hook"`, not `url: "{{api}}/hook"` with `api: $API_BASE`
+  in `state:`. Refs in a URL are escaped.
 - A `body` map is sent as JSON; a ref that is the whole value keeps its type.
 - **Retries** never risk doing something twice: GET/PUT/DELETE retry network
   errors, 429 and 5xx; POST/PATCH only retry 429 and 503 (not processed)
@@ -413,7 +415,7 @@ For decisions, `openai` backends send a JSON schema the server must follow
 shape; set `structured: false` for a server that rejects it. Replies are
 parsed leniently and a reply that still doesn't fit is asked for once more.
 
-Chat backends also take `max_tokens`, `timeout` (seconds, default 120), and
+Chat backends also take `max_tokens`, `timeout` (seconds, default 120; 0 means no limit), and
 `price_in_per_mtok` / `price_out_per_mtok` to report cost. An `anthropic`
 backend reads its key only from `api_key_env` (default `ANTHROPIC_API_KEY`)
 and its endpoint only from `base_url`; `ANTHROPIC_BASE_URL`,

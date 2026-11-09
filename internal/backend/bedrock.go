@@ -21,7 +21,7 @@ import (
 //	model:   required, a Bedrock model or inference profile ID
 //	region:  default from the AWS config
 //	profile: AWS shared-config profile to use
-//	timeout: seconds per call, retries included (default 120)
+//	timeout: seconds per call, retries included (default 120; 0 = no limit)
 type bedrockChat struct {
 	client  *bedrockruntime.Client
 	model   string
@@ -51,8 +51,11 @@ func newBedrock(cfg flow.BackendConfig) (*chatBackend, error) {
 }
 
 func (m *bedrockChat) chat(ctx context.Context, r chatRequest) (string, float64, error) {
-	ctx, cancel := context.WithTimeout(ctx, m.timeout)
-	defer cancel()
+	if m.timeout > 0 { // 0 means no limit
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, m.timeout)
+		defer cancel()
+	}
 	system, user, maxTokens := r.System, r.User, r.MaxTokens
 	in := &bedrockruntime.ConverseInput{
 		ModelId: aws.String(m.model),

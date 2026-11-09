@@ -18,7 +18,7 @@ import (
 //	model:       required, the model ID
 //	api_key_env: default ANTHROPIC_API_KEY
 //	base_url:    override the API endpoint, e.g. for a proxy
-//	timeout:     seconds per call, retries included (default 120)
+//	timeout:     seconds per call, retries included (default 120; 0 = no limit)
 //
 // Only these options pick the key and endpoint: ANTHROPIC_BASE_URL,
 // ANTHROPIC_AUTH_TOKEN and SDK profiles in the environment are ignored, so
@@ -62,8 +62,11 @@ func (m *anthropicChat) chat(ctx context.Context, r chatRequest) (string, float6
 	if !m.hasKey {
 		return "", 0, fmt.Errorf("%s is not set", m.keyEnv)
 	}
-	ctx, cancel := context.WithTimeout(ctx, m.timeout)
-	defer cancel()
+	if m.timeout > 0 { // 0 means no limit
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, m.timeout)
+		defer cancel()
+	}
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(m.model),
 		MaxTokens: int64(r.MaxTokens),

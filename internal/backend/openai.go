@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/Andree37/hunch/internal/flow"
 )
@@ -41,7 +40,7 @@ func newOpenAI(cfg flow.BackendConfig) (*chatBackend, error) {
 		keyEnv:     optString(o, "api_key_env", "OPENAI_API_KEY"),
 		structured: o["structured"] != false,
 		opts:       o,
-		client:     &http.Client{Timeout: time.Duration(optFloat(o, "timeout", 120) * float64(time.Second))},
+		client:     &http.Client{Timeout: optSeconds(o, "timeout", 120)},
 	}
 	return newChatBackend(cfg, m), nil
 }

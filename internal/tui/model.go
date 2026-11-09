@@ -550,7 +550,7 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.resumable() {
 			m.stepping.Store(false)
 			m.step()
-			return m, nil
+			return m, m.kick()
 		}
 		return m, m.startRun(false)
 	case "s":
@@ -563,7 +563,7 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.resumable() {
 			m.step()
-			return m, nil
+			return m, m.kick()
 		}
 		return m, m.startRun(true)
 	case "x":
@@ -936,7 +936,8 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 	// with the flow's recorded runs.
 	rec, closeRec := m.recorder(ctx)
 	recID := trace.NewID()
-	rec.Start(recID, m.path, m.backend, state)
+	recBackend, recState := m.backend, maps.Clone(state)
+	var recSteps []runner.Event // written once the run ends, so a stopped run leaves nothing half-written
 	go func() {
 		defer close(ch)
 		defer closeRec()
@@ -965,11 +966,15 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 			},
 			OnStart: func(node string) { send(startMsg{id, node}) },
 			OnEvent: func(ev runner.Event) {
-				rec.Step(recID, ev)
+				recSteps = append(recSteps, ev)
 				send(eventMsg{id, ev})
 			},
 		})
 		if ctx.Err() == nil { // a stopped or replaced run isn't kept
+			rec.Start(recID, m.path, recBackend, recState)
+			for _, ev := range recSteps {
+				rec.Step(recID, ev)
+			}
 			rec.End(recID, res, err)
 		}
 		// A cancelled run has been replaced; nobody is waiting for its end.
@@ -983,8 +988,9 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 // recorder opens where this flow's runs are kept. With nowhere to record
 // (runs: off) it returns a nil writer, which records nothing.
 func (m *Model) recorder(ctx context.Context) (*trace.Writer, func()) {
+	// Mock answers are made up; they'd only mislead hunch tune.
 	loc := m.flow.RunsLocation()
-	if loc == "" || !m.record {
+	if loc == "" || !m.record || m.mock() {
 		return nil, func() {}
 	}
 	w, c, err := trace.Open(ctx, loc, 0)

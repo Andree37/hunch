@@ -2,10 +2,14 @@ package tui
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -483,9 +487,12 @@ func TestStepsAppearOneAtATime(t *testing.T) {
 func TestTUIRunsAreRecorded(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.yaml")
-	src, _ := os.ReadFile("testdata/inbox.yaml")
-	os.WriteFile(path, src, 0o644)
-	m, err := New(path, map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
+	// A real backend that's never called: the flow only has actions.
+	os.WriteFile(path, []byte(`backends: {local: {kind: openai, base_url: "http://127.0.0.1:1", model: x}}
+nodes:
+  hi: {action: log, message: "hi {{sender}}"}
+`), 0o644)
+	m, err := New(path, map[string]any{"sender": "carol"}, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,11 +500,33 @@ func TestTUIRunsAreRecorded(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	_, cmd := m.Update(press("r"))
 	drive(t, m, cmd)
-	if err := m.loadRuns(); err != nil || len(m.runs) != 1 || m.runs[0].Input["sender"] != "carol" {
+	if err := m.loadRuns(); err != nil || len(m.runs) != 1 || m.runs[0].Input["sender"] != "carol" || !m.runs[0].Done {
 		t.Fatalf("want the run recorded: err=%v runs=%d", err, len(m.runs))
 	}
 	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "t recorded runs (1)") {
 		t.Errorf("tests pane should count the recorded run:\n%s", screen)
+	}
+
+	// A stopped run leaves nothing behind.
+	m.Update(press("s"))
+	m.Update(press("x"))
+	time.Sleep(50 * time.Millisecond)
+	if err := m.loadRuns(); err != nil || len(m.runs) != 1 {
+		t.Errorf("a stopped run was recorded: runs=%d err=%v", len(m.runs), err)
+	}
+}
+
+func TestMockRunsAreNotRecorded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f.yaml")
+	src, _ := os.ReadFile("testdata/inbox.yaml")
+	os.WriteFile(path, src, 0o644)
+	m, _ := New(path, map[string]any{"sender": "carol", "message": "hi"}, "mock", false)
+	m.record = true
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	_, cmd := m.Update(press("r"))
+	drive(t, m, cmd)
+	if err := m.loadRuns(); err != nil || len(m.runs) != 0 {
+		t.Errorf("mock's made-up answers were recorded: runs=%d err=%v", len(m.runs), err)
 	}
 }
 
@@ -1186,5 +1215,60 @@ func TestTextWithAColonStaysText(t *testing.T) {
 	m, _ := New("testdata/inbox.yaml", map[string]any{"sender": "carol", "message": "Note: the launch moved"}, "mock", false)
 	if got := m.state()["message"]; got != "Note: the launch moved" {
 		t.Errorf("message = %#v, want the text as typed", got)
+	}
+}
+
+func TestTryingAThresholdNeverFetches(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1) }))
+	defer srv.Close()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	os.WriteFile(path, []byte(`threshold: 0.9
+backends: {m: {kind: mock, answers: {a: yes}}}
+nodes:
+  a: {bool: "Reply to {{who}}?", then: {yes: b, no: b, unsure: fetch}}
+  fetch: {action: http, method: GET, url: "`+srv.URL+`", then: b}
+  b: {action: log, message: done}
+`), 0o644)
+	os.MkdirAll(filepath.Join(dir, "f.tests"), 0o755)
+	os.WriteFile(filepath.Join(dir, "f.tests", "ann.yaml"), []byte("input: {who: ann}\nexpect: {a: yes}\n"), 0o644)
+	m, _ := New(path, nil, "", true)
+	m.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
+	_, cmd := m.Update(press("R"))
+	pumpGrid(t, m, cmd)
+	m.Update(press("]"))
+	m.Update(press("]"))
+	if r := m.grid.rows[0]; r.needs != "fetch" || hits.Load() != 0 {
+		t.Errorf("needs=%q, %d requests sent", r.needs, hits.Load())
+	}
+}
+
+func TestGridScrollsToTheSelectedTest(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	os.WriteFile(path, []byte(`nodes:
+  a: {bool: "Reply to {{who}}?", then: {yes: b, no: b}}
+  b: {action: log, message: done}
+`), 0o644)
+	os.MkdirAll(filepath.Join(dir, "f.tests"), 0o755)
+	for i := range 30 {
+		os.WriteFile(filepath.Join(dir, "f.tests", fmt.Sprintf("t%02d-é.yaml", i)), []byte("input: {who: ann}\n"), 0o644)
+	}
+	m, _ := New(path, nil, "", true)
+	m.Update(tea.WindowSizeMsg{Width: 150, Height: 24})
+	_, cmd := m.Update(press("R"))
+	pumpGrid(t, m, cmd)
+	for range 29 {
+		m.Update(press("j"))
+	}
+	screen := ansi.Strip(m.View())
+	for _, want := range []string{"▸", "t29-é", "↑", "more"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("grid at the last test missing %q:\n%s", want, screen)
+		}
+	}
+	if strings.Contains(screen, "t00-é  yes") {
+		t.Errorf("the first test should have scrolled away:\n%s", screen)
 	}
 }

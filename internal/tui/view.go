@@ -383,7 +383,7 @@ func (m *Model) centerLines(w, h int) []string {
 	}
 
 	if m.flowView == viewGrid && m.grid != nil {
-		return append(top, m.gridLines(w)...)
+		return append(top, m.gridLines(w, h-len(top))...)
 	}
 	var lines []string
 	var rowLine []int

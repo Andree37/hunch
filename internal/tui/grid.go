@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Andree37/hunch/internal/backend"
 	"github.com/Andree37/hunch/internal/cases"
@@ -83,6 +84,7 @@ type gridRun struct {
 	asking    bool    // A is asking the model what ? tests need
 	askCost   float64 // what those questions cost
 	askNext   tea.Cmd // waits for the next answer
+	askCancel context.CancelFunc
 	started   time.Time
 	elapsed   time.Duration
 	done      bool
@@ -116,6 +118,9 @@ func (m *Model) startGrid() tea.Cmd {
 	if g := m.grid; g != nil {
 		if g.cancel != nil {
 			g.cancel()
+		}
+		if g.askCancel != nil {
+			g.askCancel()
 		}
 		prev = g.savedPrev
 		if g.done {
@@ -330,19 +335,21 @@ func (m *Model) gridColumns() []*flow.Node {
 	return cols
 }
 
-func (m *Model) gridLines(w int) []string {
+// gridLines draws the grid in w columns and h lines; when the tests don't
+// fit, the rows scroll to keep the selected one in view.
+func (m *Model) gridLines(w, h int) []string {
 	g := m.grid
 	lines := []string{m.gridSummary(), ""}
 
 	cols := m.gridColumns()
 	nameW := 4
 	for _, r := range g.rows {
-		nameW = max(nameW, len(r.name))
+		nameW = max(nameW, lipgloss.Width(r.name))
 	}
 	nameW = min(nameW, 30)
 	widths := make([]int, len(cols))
 	for i, n := range cols {
-		widths[i] = len(n.ID)
+		widths[i] = lipgloss.Width(n.ID)
 		for _, r := range g.rows {
 			widths[i] = max(widths[i], lipgloss.Width(m.gridCell(n, r)))
 		}
@@ -361,18 +368,29 @@ func (m *Model) gridLines(w int) []string {
 
 	head := "      " + fmt.Sprintf("%-*s", nameW, "test")
 	for i := range shown {
-		head += "  " + fmt.Sprintf("%-*s", widths[i], cols[i].ID)
+		id := ansi.Truncate(cols[i].ID, widths[i], "…")
+		head += "  " + id + strings.Repeat(" ", max(widths[i]-lipgloss.Width(id), 0))
 	}
 	head += "  ends at"
 	lines = append(lines, sDim.Render(head))
 
+	// Rows that don't fit scroll, keeping room for a line on each side
+	// saying how many are hidden.
+	first, last := 0, len(g.rows)
+	if room := h - len(lines) - 2; room > 0 && len(g.rows) > room+2 {
+		first = min(max(m.gridCursor-room/2, 0), len(g.rows)-room)
+		last = first + room
+	}
+	if first > 0 {
+		lines = append(lines, sDim.Render(fmt.Sprintf("      ↑ %d more", first)))
+	}
 	for ri, r := range g.rows {
-		marker := " "
-		name := r.name
-		if len(name) > nameW {
-			name = name[:nameW-1] + "…"
+		if ri < first || ri >= last {
+			continue
 		}
-		name = fmt.Sprintf("%-*s", nameW, name)
+		marker := " "
+		name := ansi.Truncate(r.name, nameW, "…")
+		name += strings.Repeat(" ", max(nameW-lipgloss.Width(name), 0))
 		if ri == m.gridCursor {
 			marker, name = sTitle.Render("▸"), sBold.Render(name)
 		}
@@ -395,6 +413,9 @@ func (m *Model) gridLines(w int) []string {
 			end = r.path[len(r.path)-1]
 		}
 		lines = append(lines, line+"  "+end)
+	}
+	if last < len(g.rows) {
+		lines = append(lines, sDim.Render(fmt.Sprintf("      ↓ %d more", len(g.rows)-last)))
 	}
 	if shown < len(cols) {
 		lines = append(lines, sDim.Render(fmt.Sprintf("+%d more questions than fit · a wider window shows them", len(cols)-shown)))
@@ -562,9 +583,7 @@ func (m *Model) gridCell(n *flow.Node, r *gridRow) string {
 			style = sYellow.Bold(true)
 		}
 	}
-	if len(text) > 12 {
-		text = text[:11] + "…"
-	}
+	text = ansi.Truncate(text, 12, "…")
 	cell := style.Render(text)
 	if p, ok := m.grid.prev[r.name]; ok {
 		if pe, ok := p.events[n.ID]; ok && len(pe.Decisions) > 0 && len(ev.Decisions) > 0 && changed(pe.Decisions[0], ev.Decisions[0]) {
