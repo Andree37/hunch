@@ -3,6 +3,7 @@ package flow
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -114,4 +115,63 @@ func keyIndex(m *yaml.Node, key string) int {
 		}
 	}
 	return -1
+}
+
+// SetThreshold sets one node's `threshold:` in a flow file, changing only
+// that value (or adding it as the node's first field) so the rest of the
+// file, comments included, stays byte for byte.
+func SetThreshold(src []byte, node string, value float64) ([]byte, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(src, &doc); err != nil {
+		return nil, err
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("file is not a map")
+	}
+	root := doc.Content[0]
+	i := keyIndex(root, "nodes")
+	if i < 0 {
+		return nil, fmt.Errorf("no nodes")
+	}
+	nodes := root.Content[i+1]
+	j := keyIndex(nodes, node)
+	if j < 0 {
+		return nil, fmt.Errorf("no node %q", node)
+	}
+	n := nodes.Content[j+1]
+	if n.Kind != yaml.MappingNode || len(n.Content) == 0 {
+		return nil, fmt.Errorf("node %q is not a map", node)
+	}
+	text := strconv.FormatFloat(value, 'f', -1, 64)
+	lines := strings.SplitAfter(string(src), "\n")
+	edit := func(line, col int, cut int, insert string) {
+		r := []rune(lines[line-1])
+		at := min(col-1, len(r))
+		lines[line-1] = string(r[:at]) + insert + string(r[min(at+cut, len(r)):])
+	}
+	switch k := keyIndex(n, "threshold"); {
+	case k >= 0:
+		v := n.Content[k+1]
+		r := []rune(lines[v.Line-1])
+		end := v.Column - 1
+		for end < len(r) && strings.ContainsRune("0123456789.+-eE", r[end]) {
+			end++
+		}
+		edit(v.Line, v.Column, end-(v.Column-1), text)
+	case n.Style&yaml.FlowStyle != 0:
+		edit(n.Line, n.Column+1, 0, "threshold: "+text+", ")
+	default:
+		first := n.Content[0]
+		indent := strings.Repeat(" ", first.Column-1)
+		lines[first.Line-1] = indent + "threshold: " + text + "\n" + lines[first.Line-1]
+	}
+	out := []byte(strings.Join(lines, ""))
+	f, err := Parse(out)
+	if err != nil {
+		return nil, fmt.Errorf("setting %s's threshold broke the file: %w", node, err)
+	}
+	if got := f.Node(node); got == nil || got.Threshold != value {
+		return nil, fmt.Errorf("couldn't set %s's threshold", node)
+	}
+	return out, nil
 }

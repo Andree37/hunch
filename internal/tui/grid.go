@@ -79,7 +79,7 @@ type gridRun struct {
 	// from them while another threshold is tried. savedPrev is prev for
 	// those rows.
 	model     []*gridRow
-	ranSteps  int
+	ranShifts map[string]int
 	savedPrev map[string]*gridRow
 	asking    bool    // A is asking the model what ? tests need
 	askCost   float64 // what those questions cost
@@ -140,10 +140,10 @@ func (m *Model) startGrid() tea.Cmd {
 	m.gridID++
 	ctx, cancel := context.WithCancel(context.Background())
 	g := &gridRun{
-		id: m.gridID, prev: prev, savedPrev: prev, ranSteps: m.shiftSteps,
+		id: m.gridID, prev: prev, savedPrev: prev, ranShifts: maps.Clone(m.shifts),
 		started: time.Now(), cancel: cancel, ch: make(chan tea.Msg, 2*len(m.cases)+1),
 	}
-	shift := m.shift()
+	shifts := shiftsOf(m.shifts)
 	all := slices.Clone(m.cases)
 	for _, c := range all {
 		state := maps.Clone(f.State)
@@ -180,7 +180,7 @@ func (m *Model) startGrid() tea.Cmd {
 					row.err = err
 				} else {
 					res, err := runner.Run(ctx, &f, maps.Clone(row.inputs), runner.Options{
-						Backends: backends, DryRun: true, Fake: c.HTTP, ThresholdShift: shift,
+						Backends: backends, DryRun: true, Fake: c.HTTP, ThresholdShifts: shifts,
 						OnStart: func(node string) {
 							mu.Lock()
 							row.path = append(row.path, node)
@@ -355,24 +355,55 @@ func (m *Model) gridLines(w, h int) []string {
 		}
 		widths[i] = min(max(widths[i], 5), 16)
 	}
-	// Columns that don't fit are left out, and counted.
-	room := w - 4 - nameW - 2 - 14
-	shown := 0
-	for _, cw := range widths {
-		if room < cw+2 {
-			break
+	// Columns that don't fit are left out, and counted; they scroll so the
+	// selected question stays in view.
+	sel := min(max(m.gridCol, 0), max(len(cols)-1, 0))
+	fit := func(from int) int {
+		room, n := w-4-nameW-2-14, 0
+		for _, cw := range widths[from:] {
+			if room < cw+2 {
+				break
+			}
+			room -= cw + 2
+			n++
 		}
-		room -= cw + 2
-		shown++
+		return n
+	}
+	firstCol := 0
+	for firstCol < sel && sel >= firstCol+fit(firstCol) {
+		firstCol++
+	}
+	shown := make([]int, 0, len(cols))
+	for i := range fit(firstCol) {
+		shown = append(shown, firstCol+i)
 	}
 
-	head := "      " + fmt.Sprintf("%-*s", nameW, "test")
-	for i := range shown {
-		id := ansi.Truncate(cols[i].ID, widths[i], "…")
-		head += "  " + id + strings.Repeat(" ", max(widths[i]-lipgloss.Width(id), 0))
+	pad := func(s string, w int) string { return s + strings.Repeat(" ", max(w-lipgloss.Width(s), 0)) }
+	head := sDim.Render("      " + pad("test", nameW))
+	ths := "      " + pad("threshold", nameW)
+	for _, i := range shown {
+		id := pad(ansi.Truncate(cols[i].ID, widths[i], "…"), widths[i])
+		if i == sel {
+			id = sTitle.Underline(true).Render(id)
+		} else {
+			id = sDim.Render(id)
+		}
+		head += "  " + id
+		th := ""
+		if n := cols[i]; tunable(n) {
+			th = fmt.Sprintf("%.2f", m.threshold(n))
+			if _, tried := m.shifts[n.ID]; tried {
+				th = sYellow.Render(pad(th+"*", widths[i]))
+			} else {
+				th = sDim.Render(pad(th, widths[i]))
+			}
+		} else {
+			th = pad("", widths[i])
+		}
+		ths += "  " + th
 	}
-	head += "  ends at"
-	lines = append(lines, sDim.Render(head))
+	head += sDim.Render("  ends at")
+	lines = append(lines, head, sDim.Render(ths[:6+nameW])+ths[6+nameW:])
 
 	// Rows that don't fit scroll, keeping room for a line on each side
 	// saying how many are hidden.
@@ -395,7 +426,7 @@ func (m *Model) gridLines(w, h int) []string {
 			marker, name = sTitle.Render("▸"), sBold.Render(name)
 		}
 		line := marker + m.rowMark(r) + " " + name
-		for i := range shown {
+		for _, i := range shown {
 			cell := m.gridCell(cols[i], r)
 			line += "  " + cell + strings.Repeat(" ", max(widths[i]-lipgloss.Width(cell), 0))
 		}
@@ -417,8 +448,8 @@ func (m *Model) gridLines(w, h int) []string {
 	if last < len(g.rows) {
 		lines = append(lines, sDim.Render(fmt.Sprintf("      ↓ %d more", len(g.rows)-last)))
 	}
-	if shown < len(cols) {
-		lines = append(lines, sDim.Render(fmt.Sprintf("+%d more questions than fit · a wider window shows them", len(cols)-shown)))
+	if len(shown) < len(cols) {
+		lines = append(lines, sDim.Render(fmt.Sprintf("%d of %d questions shown · ←/→ scroll", len(shown), len(cols))))
 	}
 
 	// What went wrong, for every test that failed.
@@ -499,15 +530,15 @@ func (m *Model) gridSummary() string {
 			}
 		}
 		s += sDim.Render(fmt.Sprintf(" · was %d/%d", was, wasTotal))
-		if m.shiftSteps != g.ranSteps {
-			s += sDim.Render(" at " + m.thresholdText(g.ranSteps))
+		if !maps.Equal(m.shifts, g.ranShifts) {
+			s += sDim.Render(" at " + m.triedText(g.ranShifts))
 		}
 	}
 	if close > 0 {
 		s += sYellow.Render(" · " + plural(close, "close call"))
 	}
-	if g.done && m.shiftSteps != g.ranSteps {
-		s += sYellow.Render(" · trying " + m.thresholdText(m.shiftSteps))
+	if g.done && !maps.Equal(m.shifts, g.ranShifts) {
+		s += sYellow.Render(" · trying " + m.triedText(m.shifts))
 		if g.askCost > 0 {
 			s += sDim.Render(fmt.Sprintf(" · asked $%.6f more", g.askCost))
 		}

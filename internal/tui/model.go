@@ -123,8 +123,9 @@ type Model struct {
 	replayK     int        // how many of its steps are shown
 	live        bool       // shell and http nodes really run; off by default
 
-	grid       *gridRun // every test run at once, shown side by side
-	shiftSteps int      // [ and ] move every threshold by this many steps
+	grid       *gridRun       // every test run at once, shown side by side
+	gridCol    int            // the question selected in the grid
+	shifts     map[string]int // thresholds tried with [ and ], in steps, by node
 	gridID     int
 	gridCursor int
 
@@ -472,6 +473,14 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.startGrid()
 	case "A":
 		return m, m.askMissing()
+	case "left", "h":
+		if m.flowView == viewGrid && m.grid != nil {
+			m.gridCol = max(min(m.gridCol, len(m.gridColumns())-1)-1, 0)
+		}
+	case "right", "l":
+		if m.flowView == viewGrid && m.grid != nil {
+			m.gridCol = min(m.gridCol+1, max(len(m.gridColumns())-1, 0))
+		}
 	case "[":
 		m.moveThreshold(-1)
 	case "]":
@@ -651,6 +660,10 @@ func (m *Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.revalidate()
 		}
 	case "w":
+		if m.flowView == viewGrid && len(m.shifts) > 0 {
+			m.keepThresholds()
+			return m, nil
+		}
 		if m.active >= 0 {
 			m.saveCase(m.cases[m.active])
 			return m, nil
@@ -942,11 +955,11 @@ func (m *Model) startRun(stepping bool) tea.Cmd {
 		defer close(ch)
 		defer closeRec()
 		res, err := runner.Run(ctx, &f, state, runner.Options{
-			Backends:       backends,
-			Stdout:         io.Discard,
-			DryRun:         !m.live,
-			Fake:           fakes,
-			ThresholdShift: m.shift(),
+			Backends:        backends,
+			Stdout:          io.Discard,
+			DryRun:          !m.live,
+			Fake:            fakes,
+			ThresholdShifts: shiftsOf(m.shifts),
 			Before: func(ctx context.Context, node string) error {
 				if !stepMode.Load() {
 					return nil

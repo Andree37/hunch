@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -672,13 +673,13 @@ nodes:
 	m.Update(press("]"))
 	m.Update(press("]"))
 	screen := ansi.Strip(m.View())
-	for _, want := range []string{"trying threshold 1.00", "1 needs the model (A asks it)", "was 1/1 at threshold 0.90", "? ann", "asks ask · A"} {
+	for _, want := range []string{"trying a 1.00", "1 needs the model (A asks it)", "was 1/1 at the flow's thresholds", "1.00*", "? ann", "asks ask · A"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("at 1.00, grid missing %q:\n%s", want, screen)
 		}
 	}
-	if m.Update(press("]")); m.shiftSteps != 2 {
-		t.Errorf("] past 1.00 should stop, steps = %d", m.shiftSteps)
+	if m.Update(press("]")); m.shifts["a"] != 2 {
+		t.Errorf("] past 1.00 should stop, steps = %d", m.shifts["a"])
 	}
 
 	// A asks only what the ? test needs; the answer is kept, so going away
@@ -706,7 +707,7 @@ nodes:
 	m.Update(press("["))
 	m.Update(press("["))
 	screen = ansi.Strip(m.View())
-	for _, want := range []string{"trying threshold 0.85", "✓ 1/1 passed", "yes ✓"} {
+	for _, want := range []string{"trying a 0.85", "✓ 1/1 passed", "yes ✓"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("at 0.85, grid missing %q:\n%s", want, screen)
 		}
@@ -715,8 +716,8 @@ nodes:
 	// Back at the flow's threshold, the grid is the model's run again, and
 	// a single run routes at the tried threshold too.
 	m.Update(press("]"))
-	if m.shiftSteps != 0 || m.grid.rows[0] != m.grid.model[0] || strings.Contains(ansi.Strip(m.View()), "trying") {
-		t.Errorf("back at 0.90: steps=%d", m.shiftSteps)
+	if len(m.shifts) != 0 || m.grid.rows[0] != m.grid.model[0] || strings.Contains(ansi.Strip(m.View()), "trying") {
+		t.Errorf("back at 0.90: shifts=%v", m.shifts)
 	}
 	m.Update(press("]"))
 	m.Update(press("]"))
@@ -726,6 +727,52 @@ nodes:
 	drive(t, m, cmd)
 	if !slices.Contains(m.run.path, "ask") {
 		t.Errorf("a run at 1.00 should go to ask: %v", m.run.path)
+	}
+}
+
+func TestThresholdsArePerQuestionAndKept(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.yaml")
+	os.WriteFile(path, []byte(`threshold: 0.9
+backends: {m: {kind: mock, answers: {a: yes, b: yes}}}
+nodes:
+  # first question
+  a: {bool: "Reply to {{who}}?", then: {yes: b, no: done, unsure: done}}
+  b:
+    bool: "Urgent?"   # second question
+    then: {yes: done, no: done, unsure: done}
+  done: {action: log, message: ok}
+`), 0o644)
+	os.MkdirAll(filepath.Join(dir, "f.tests"), 0o755)
+	os.WriteFile(filepath.Join(dir, "f.tests", "ann.yaml"), []byte("input: {who: ann}\n"), 0o644)
+	m, _ := New(path, nil, "", true)
+	m.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
+	_, cmd := m.Update(press("R"))
+	pumpGrid(t, m, cmd)
+
+	// → picks b; its threshold moves alone.
+	m.Update(press("right"))
+	m.Update(press("["))
+	m.Update(press("["))
+	if !maps.Equal(m.shifts, map[string]int{"b": -2}) {
+		t.Fatalf("shifts = %v", m.shifts)
+	}
+	if a, b := m.threshold(m.flow.Node("a")), m.threshold(m.flow.Node("b")); a != 0.9 || b != 0.8 {
+		t.Errorf("thresholds a=%v b=%v", a, b)
+	}
+	if screen := ansi.Strip(m.View()); !strings.Contains(screen, "trying b 0.80") || !strings.Contains(screen, "0.80*") {
+		t.Errorf("grid should show b's tried threshold:\n%s", screen)
+	}
+
+	// w writes it into the flow, keeping everything else as it was.
+	m.Update(press("w"))
+	src, _ := os.ReadFile(path)
+	if !strings.Contains(string(src), "  b:\n    threshold: 0.8\n    bool: \"Urgent?\"   # second question") ||
+		!strings.Contains(string(src), "# first question") || len(m.shifts) != 0 {
+		t.Errorf("kept file:\n%s\nshifts=%v", src, m.shifts)
+	}
+	if !strings.Contains(m.flash, "kept b 0.80 in f.yaml") {
+		t.Errorf("flash = %q", m.flash)
 	}
 }
 

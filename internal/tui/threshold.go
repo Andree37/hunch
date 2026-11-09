@@ -2,94 +2,142 @@ package tui
 
 import (
 	"context"
-	"net/http"
-	"sync"
-
 	"errors"
 	"fmt"
-	tea "github.com/charmbracelet/bubbletea"
 	"maps"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Andree37/hunch/internal/backend"
 	"github.com/Andree37/hunch/internal/flow"
 	"github.com/Andree37/hunch/internal/runner"
 )
 
-// [ and ] try other thresholds without editing the flow: every decision's
-// threshold moves by thresholdStep. The grid routes each test again on the
+// In the grid, ←/→ pick a question and [ and ] try another threshold for
+// it without editing the flow. The grid routes each test again on the
 // answers the model already gave, so trying a threshold costs nothing; a
 // test that now reaches a question the model was never asked shows ? until
-// R asks it.
+// A asks it. w writes the tried thresholds into the flow.
 
 const thresholdStep = 0.05
 
-// shift is how far the thresholds are moved from the flow's.
-func (m *Model) shift() float64 { return float64(m.shiftSteps) * thresholdStep }
+// shiftsOf turns steps by node into threshold shifts.
+func shiftsOf(steps map[string]int) map[string]float64 {
+	out := make(map[string]float64, len(steps))
+	for id, n := range steps {
+		out[id] = float64(n) * thresholdStep
+	}
+	return out
+}
 
-// threshold is the threshold n routes on in this TUI, shifted.
+// threshold is the threshold n routes on in this TUI, with any tried shift.
 func (m *Model) threshold(n *flow.Node) float64 {
-	return runner.Threshold(m.flow, n, m.shift())
+	return runner.Threshold(m.flow, n, float64(m.shifts[n.ID])*thresholdStep)
 }
 
-// ownThresholds reports whether any decision sets its own threshold, so a
-// shift can't be shown as one number.
-func (m *Model) ownThresholds() bool {
+// tunable reports whether n routes on its confidence, so its threshold
+// matters. Several questions at once route on their `then` alone.
+func tunable(n *flow.Node) bool {
+	return n != nil && n.Kind.IsDecision() && n.Kind != flow.Questions
+}
+
+// triedText is "intent 0.70, owner 0.55" for the thresholds tried, in flow
+// order, or "the flow's thresholds".
+func (m *Model) triedText(steps map[string]int) string {
+	var parts []string
 	for _, n := range m.flow.Nodes {
-		if n.Kind.IsDecision() && n.Threshold > 0 {
-			return true
+		if s, ok := steps[n.ID]; ok && s != 0 {
+			parts = append(parts, fmt.Sprintf("%s %.2f", n.ID, runner.Threshold(m.flow, n, float64(s)*thresholdStep)))
 		}
 	}
-	return false
-}
-
-// thresholdText is "threshold 0.70", or "thresholds +0.10" when decisions
-// have their own.
-func (m *Model) thresholdText(steps int) string {
-	shift := float64(steps) * thresholdStep
-	if m.ownThresholds() {
-		if steps == 0 {
-			return "the flow's thresholds"
-		}
-		return fmt.Sprintf("thresholds %+.2f", shift)
+	if len(parts) == 0 {
+		return "the flow's thresholds"
 	}
-	return fmt.Sprintf("threshold %.2f", runner.Threshold(m.flow, &flow.Node{}, shift))
+	return strings.Join(parts, ", ")
 }
 
-// moveThreshold shifts every threshold by steps and routes the grid again.
+// gridNode is the question selected in the grid, if any.
+func (m *Model) gridNode() *flow.Node {
+	if m.grid == nil {
+		return nil
+	}
+	cols := m.gridColumns()
+	if len(cols) == 0 {
+		return nil
+	}
+	return cols[min(max(m.gridCol, 0), len(cols)-1)]
+}
+
+// moveThreshold moves the selected question's threshold by steps and
+// routes the grid again.
 func (m *Model) moveThreshold(steps int) {
-	if m.flow == nil {
+	n := m.gridNode()
+	if m.flow == nil || m.flowView != viewGrid || n == nil {
+		m.flash = "R runs every test; then ←/→ pick a question and [ ] try its threshold"
 		return
 	}
-	next := m.shiftSteps + steps
-	// Stop once every threshold is pinned at 0 or 1.
-	moves := false
-	for _, n := range m.flow.Nodes {
-		if !n.Kind.IsDecision() {
-			continue
-		}
-		cur := runner.Threshold(m.flow, n, m.shift())
-		if runner.Threshold(m.flow, n, float64(next)*thresholdStep) != cur {
-			moves = true
-		}
-	}
-	if !moves {
+	if !tunable(n) {
+		m.flash = n.ID + " doesn't route on confidence · ←/→ pick another question"
 		return
 	}
-	if m.grid != nil && m.grid.asking {
+	if m.grid.asking {
 		m.flash = "wait for the model to answer"
 		return
 	}
-	m.shiftSteps = next
-	switch {
-	case m.shiftSteps == 0:
-		m.flash = "back to " + m.thresholdText(0)
-	case m.ownThresholds():
-		m.flash = fmt.Sprintf("trying %s · to keep it, change them in the flow", m.thresholdText(m.shiftSteps))
-	default:
-		m.flash = fmt.Sprintf("trying %s · to keep it, set threshold: %.2f in the flow", m.thresholdText(m.shiftSteps), m.threshold(&flow.Node{}))
+	next := m.shifts[n.ID] + steps
+	cur := m.threshold(n)
+	if runner.Threshold(m.flow, n, float64(next)*thresholdStep) == cur {
+		return // pinned at 0 or 1
+	}
+	if m.shifts == nil {
+		m.shifts = map[string]int{}
+	}
+	m.shifts[n.ID] = next
+	if next == 0 {
+		delete(m.shifts, n.ID)
+	}
+	if next == 0 {
+		m.flash = fmt.Sprintf("%s back to %.2f, as in the flow", n.ID, m.threshold(n))
+	} else {
+		m.flash = fmt.Sprintf("%s: trying %.2f (%.2f in the flow) · w keeps it", n.ID, m.threshold(n), m.flow.ThresholdFor(n))
 	}
 	m.retune()
+}
+
+// keepThresholds writes the tried thresholds into the flow file. The file
+// watcher then reloads it and runs the tests again.
+func (m *Model) keepThresholds() {
+	if len(m.shifts) == 0 {
+		return
+	}
+	src, err := os.ReadFile(m.path)
+	if err != nil {
+		m.flash = err.Error()
+		return
+	}
+	var kept []string
+	for _, n := range m.flow.Nodes {
+		if _, ok := m.shifts[n.ID]; !ok {
+			continue
+		}
+		v := m.threshold(n)
+		if src, err = flow.SetThreshold(src, n.ID, v); err != nil {
+			m.flash = "couldn't keep it: " + err.Error()
+			return
+		}
+		kept = append(kept, fmt.Sprintf("%s %.2f", n.ID, v))
+	}
+	if err := os.WriteFile(m.path, src, 0o644); err != nil {
+		m.flash = err.Error()
+		return
+	}
+	m.shifts = nil
+	m.flash = "kept " + strings.Join(kept, ", ") + " in " + filepath.Base(m.path)
 }
 
 // retune shows the grid at the current thresholds: the model's own rows
@@ -100,7 +148,7 @@ func (m *Model) retune() {
 	if g == nil || !g.done || g.model == nil {
 		return
 	}
-	if m.shiftSteps == g.ranSteps {
+	if maps.Equal(m.shifts, g.ranShifts) {
 		g.rows, g.prev = g.model, g.savedPrev
 		return
 	}
@@ -108,14 +156,14 @@ func (m *Model) retune() {
 	g.rows = make([]*gridRow, len(g.model))
 	for i, r := range g.model {
 		g.prev[r.name] = r
-		g.rows[i] = rerouted(context.Background(), m.flow, r, m.shift(), nil)
+		g.rows[i] = rerouted(context.Background(), m.flow, r, shiftsOf(m.shifts), nil)
 	}
 }
 
 // rerouted runs a test again with every model call answered from what the
 // model said when the grid ran. With real backends, what it was never asked
 // is asked now, and kept with the rest.
-func rerouted(ctx context.Context, f *flow.Flow, base *gridRow, shift float64, real map[string]backend.Backend) *gridRow {
+func rerouted(ctx context.Context, f *flow.Flow, base *gridRow, shifts map[string]float64, real map[string]backend.Backend) *gridRow {
 	if base.kase == nil || (base.err != nil && len(base.path) == 0) {
 		return base
 	}
@@ -137,7 +185,7 @@ func rerouted(ctx context.Context, f *flow.Flow, base *gridRow, shift float64, r
 	}
 	maps.Copy(fakes, base.kase.HTTP)
 	res, err := runner.Run(ctx, f, maps.Clone(base.inputs), runner.Options{
-		Backends: backends, DryRun: true, Fake: fakes, ThresholdShift: shift,
+		Backends: backends, DryRun: true, Fake: fakes, ThresholdShifts: shifts,
 		// Trying a threshold never touches the network: a GET the grid
 		// didn't make waits for A, like a question.
 		Before: func(_ context.Context, id string) error {
@@ -300,7 +348,7 @@ func (m *Model) askMissing() tea.Cmd {
 		m.flash = err.Error()
 		return nil
 	}
-	shift := m.shift()
+	shifts := shiftsOf(m.shifts)
 	g.asking = true
 	ctx, cancel := context.WithCancel(context.Background())
 	g.askCancel = cancel
@@ -320,7 +368,7 @@ func (m *Model) askMissing() tea.Cmd {
 			sem <- struct{}{}
 			go func() {
 				defer func() { <-sem; wg.Done() }()
-				row := rerouted(ctx, f, bases[k], shift, backends)
+				row := rerouted(ctx, f, bases[k], shifts, backends)
 				if ctx.Err() == nil {
 					ch <- askRowMsg{id, i, row}
 				}
